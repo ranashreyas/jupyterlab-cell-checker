@@ -57,6 +57,7 @@
     "@jupyterlab/application": "^4.0.0",
     "@jupyterlab/apputils": "^4.2.1",
     "@jupyterlab/cells": "^4.1.2",
+    "@jupyterlab/mainmenu": "^4.1.2",
     "@jupyterlab/nbformat": "^4.1.2",
     "@jupyterlab/notebook": "^4.1.1",
     "@lumino/widgets": "^2.3.1"
