@@ -8,7 +8,8 @@ import { ToolbarButton } from '@jupyterlab/apputils';
 import { MarkdownCell, ICellModel } from '@jupyterlab/cells';
 import { IMainMenu } from '@jupyterlab/mainmenu';
 import { IDisposable } from '@lumino/disposable';
-// import { Menu } from '@lumino/widgets';
+import { IStatusBar } from '@jupyterlab/statusbar';
+import { Widget } from '@lumino/widgets';
 
 
 function checkHtmlNoAlt(htmlString: string): boolean {
@@ -38,18 +39,19 @@ function checkMarkdownCellForImageWithoutAlt(cell: MarkdownCell): boolean {
   return markdownNoAlt || htmlNoAlt;
 }
 
-function attachContentChangedListener(cell: MarkdownCell, isEnabled: () => boolean) {
+function attachContentChangedListener(altCellList: AltCellList, cell: MarkdownCell, isEnabled: () => boolean) {
   cell.model.contentChanged.connect(() => {
     if (isEnabled()){
       const hasImageWithoutAlt = checkMarkdownCellForImageWithoutAlt(cell);
-      applyVisualIndicator(cell, hasImageWithoutAlt);
+      applyVisualIndicator(altCellList, cell, hasImageWithoutAlt);
     } else {
-      applyVisualIndicator(cell, false);
+      applyVisualIndicator(altCellList, cell, false);
     }
   });
 }
 
-function applyVisualIndicator(cell: MarkdownCell, applyIndic: boolean) {
+
+function applyVisualIndicator(altCellList: AltCellList, cell: MarkdownCell, applyIndic: boolean) {
   const indicatorId = `accessibility-indicator-${cell.model.id}`;
 
   if (applyIndic) {
@@ -63,13 +65,16 @@ function applyVisualIndicator(cell: MarkdownCell, applyIndic: boolean) {
     indicator.style.borderRadius = '50%';
     indicator.style.backgroundColor = '#ff8080';
     cell.node.appendChild(indicator);
+    altCellList.addCell(cell.model.id);
   } else {
     let indicator = document.getElementById(indicatorId);
     indicator?.remove();
+    altCellList.removeCell(cell.model.id);
   }
+
 }
 
-function addToolbarButton(notebookPanel: NotebookPanel, isEnabled: () => boolean, toggleEnabled: () => void): IDisposable {
+function addToolbarButton(altCellList: AltCellList, notebookPanel: NotebookPanel, isEnabled: () => boolean, toggleEnabled: () => void): IDisposable {
   const button = new ToolbarButton({
     // className: 'my-altTextCheck-button',
     label: 'Alt Text Check',
@@ -81,9 +86,9 @@ function addToolbarButton(notebookPanel: NotebookPanel, isEnabled: () => boolean
           const markdownCell = cell as MarkdownCell;
           if (isEnabled()) {
             const hasImageWithoutAlt = checkMarkdownCellForImageWithoutAlt(markdownCell);
-            applyVisualIndicator(markdownCell, hasImageWithoutAlt);
+            applyVisualIndicator(altCellList, markdownCell, hasImageWithoutAlt);
           } else {
-            applyVisualIndicator(markdownCell, false);
+            applyVisualIndicator(altCellList, markdownCell, false);
           }
         }
       });
@@ -96,13 +101,13 @@ function addToolbarButton(notebookPanel: NotebookPanel, isEnabled: () => boolean
   notebookPanel.toolbar.insertItem(10, 'altTextCheck', button);
   
   let elem = document.getElementById('alt-text-check-toggle');
-  elem!.style.backgroundColor = '#5c94ed';
+  elem!.style.backgroundColor = '#0000';
 
   return button;
 }
 
 function updateButtonAppearance(button: ToolbarButton, isOn: boolean) {
-  if (isOn) {
+  if (!isOn) {
     let elem = document.getElementById('alt-text-check-toggle');
     elem!.style.backgroundColor = '#5c94ed';
   } else {
@@ -114,21 +119,24 @@ function updateButtonAppearance(button: ToolbarButton, isOn: boolean) {
 const plugin: JupyterFrontEndPlugin<void> = {
   id: 'jupyterlab_accessibility:plugin',
   autoStart: true,
-  requires: [INotebookTracker, IMainMenu],
-  activate: (app: JupyterFrontEnd, notebookTracker: INotebookTracker, mainMenu: IMainMenu) => {
+  requires: [INotebookTracker, IMainMenu, IStatusBar],
+  activate: (app: JupyterFrontEnd, notebookTracker: INotebookTracker, mainMenu: IMainMenu, statusBar: IStatusBar | null) => {
     console.log('JupyterLab extension jupyterlab_accessibility is activated!');
-    
-    let isEnabled = true; // Flag to track the extension's enabled state
 
+    let isEnabled = true;
     // Function to toggle the isEnabled state
     const toggleEnabled = () => {
       isEnabled = !isEnabled;
       console.log(`Accessibility checks ${isEnabled ? 'enabled' : 'disabled'}.`);
     };
 
+    const altCellList: AltCellList = new AltCellList(notebookTracker);
+    altCellList.id = 'JupyterShoutWidget'; // Widgets need an id
+    app.shell.add(altCellList, 'right');
+    
     // When a new notebook is created or opened, add the toolbar button
     notebookTracker.widgetAdded.connect((sender, notebookPanel: NotebookPanel) => {
-      addToolbarButton(notebookPanel, () => isEnabled, toggleEnabled);
+      addToolbarButton(altCellList, notebookPanel, () => isEnabled, toggleEnabled);
     });
 
     notebookTracker.currentChanged.connect((sender, notebookPanel) => {
@@ -141,14 +149,14 @@ const plugin: JupyterFrontEndPlugin<void> = {
         content.widgets.forEach(cell => {
           if (cell.model.type === 'markdown') {
             const markdownCell = cell as MarkdownCell;
-            attachContentChangedListener(markdownCell, () => isEnabled);
+            attachContentChangedListener(altCellList, markdownCell, () => isEnabled);
             
             //for each existing cell, check the accessibility once to initially flag it or not
             if (isEnabled) {
               const hasImageWithoutAlt = checkMarkdownCellForImageWithoutAlt(markdownCell);
-              applyVisualIndicator(markdownCell, hasImageWithoutAlt);
+              applyVisualIndicator(altCellList, markdownCell, hasImageWithoutAlt);
             } else {
-              applyVisualIndicator(markdownCell, false);
+              applyVisualIndicator(altCellList, markdownCell, false);
             }
           }
         });
@@ -160,7 +168,7 @@ const plugin: JupyterFrontEndPlugin<void> = {
               args.newValues.forEach((cellModel: ICellModel) => {
                 const cell = content.widgets.find(c => c.model.id === cellModel.id);
                 if (cell && cell.model.type === 'markdown') {
-                  attachContentChangedListener(cell as MarkdownCell, () => isEnabled);
+                  attachContentChangedListener(altCellList, cell as MarkdownCell, () => isEnabled);
                 }
               });
             }
@@ -170,5 +178,60 @@ const plugin: JupyterFrontEndPlugin<void> = {
     });
   }
 };
+
+class AltCellList extends Widget {
+  
+  private _listCells: HTMLElement;
+  private _cellMap: Map<string, HTMLElement>;
+  private _notebookTracker: INotebookTracker;
+
+  constructor(notebookTracker: INotebookTracker) {
+    super();
+    this._cellMap = new Map<string, HTMLElement>();
+    this._listCells = document.createElement('ul');
+    this._notebookTracker = notebookTracker;
+    this.node.appendChild(this._listCells);
+  }
+
+  addCell(cellId: string): void {
+    if (!this._cellMap.has(cellId)) {
+      const listItem = document.createElement('li');
+      listItem.id = `cell-${cellId}`;
+      listItem.style.listStyleType = 'None';
+
+      const button = document.createElement('button');
+      button.textContent = "Cell Id: " + cellId.slice(0,5);
+      button.style.margin = '5px';
+      button.addEventListener('click', () => {
+        this.scrollToCell(cellId);
+      });
+      
+      listItem.appendChild(button);
+      this._listCells.appendChild(listItem);
+      this._cellMap.set(cellId, listItem);
+    }
+  }
+
+  removeCell(cellId: string): void {
+    const listItem = this._cellMap.get(cellId);
+    if (listItem) {
+      this._listCells.removeChild(listItem);
+      this._cellMap.delete(cellId);
+    }
+  }
+
+  scrollToCell(cellId: string): void {
+    const notebookPanel = this._notebookTracker.currentWidget;
+    const notebook = notebookPanel!.content;
+    
+    for (let i = 0; i < notebook.widgets.length; i++) {
+      const cell = notebook.widgets[i];
+      if (cell.model.id === cellId) {
+        cell.node.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }
+    }
+  }
+  
+}
 
 export default plugin;
