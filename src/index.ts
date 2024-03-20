@@ -11,49 +11,80 @@ import { IDisposable } from '@lumino/disposable';
 import { Widget } from '@lumino/widgets';
 import { LabIcon } from '@jupyterlab/ui-components';
 
+function waitForRandomTimeAndGetRandomNumber(): Promise<number> {
+  return new Promise((resolve) => {
+    const time = Math.floor(Math.random() * 5000); // Random time between 0-5 seconds
+    setTimeout(() => resolve(Math.floor(Math.random() * 11)), time); // Random number between 0-10
+  });
+}
 
-
-function checkHtmlNoAlt(htmlString: string): boolean {
+async function checkHtmlNoAlt(htmlString: string): Promise<string[]> {
   const parser = new DOMParser();
   const doc = parser.parseFromString(htmlString, "text/html");
   const images = doc.querySelectorAll("img");
-  
+
+  let accessibilityTests: string[] = [];
+
   for (let i = 0; i < images.length; i++) {
     const img = images[i];
     if (!img.hasAttribute("alt") || img.getAttribute("alt") === "") {
-      return true;
+      accessibilityTests.push("Alt");
     }
   }
-  return false;
+
+  const randomNumberPromises = Array.from(images).map(() => waitForRandomTimeAndGetRandomNumber());
+  const randomNumbers = await Promise.all(randomNumberPromises);
+
+  accessibilityTests = [...accessibilityTests, ...randomNumbers.map(String)];
+
+  return accessibilityTests;
 }
 
-function checkMDNoAlt(mdString: string): boolean {
+function checkMDNoAlt(mdString: string): string[] {
   const imageRegex = /!\[\](\([^)]+\))/g;
-  return imageRegex.test(mdString);
+  if (imageRegex.test(mdString)){
+    return ["Alt"];
+  } else {
+    return [];
+  }
 }
 
-function checkMarkdownCellForImageWithoutAlt(cell: MarkdownCell): boolean {
+async function checkMarkdownCellForImageWithoutAlt(cell: MarkdownCell): Promise<string[]> {
   const cellText = cell.model.toJSON().source.toString();
 
   const markdownNoAlt = checkMDNoAlt(cellText);
-  const htmlNoAlt = checkHtmlNoAlt(cellText);
-  return markdownNoAlt || htmlNoAlt;
+  const htmlNoAlt = await checkHtmlNoAlt(cellText);
+  return htmlNoAlt.concat(markdownNoAlt);
 }
 
-function attachContentChangedListener(altCellList: AltCellList, cell: MarkdownCell, isEnabled: () => boolean) {
-  cell.model.contentChanged.connect(() => {
+async function attachContentChangedListener(altCellList: AltCellList, cell: MarkdownCell, isEnabled: () => boolean) {
+  cell.model.contentChanged.connect(async () => {
     if (isEnabled()){
-      const hasImageWithoutAlt = checkMarkdownCellForImageWithoutAlt(cell);
+      const hasImageWithoutAlt = await checkMarkdownCellForImageWithoutAlt(cell);
       applyVisualIndicator(altCellList, cell, hasImageWithoutAlt);
     } else {
-      applyVisualIndicator(altCellList, cell, false);
+      applyVisualIndicator(altCellList, cell, []);
     }
   });
 }
 
-function applyVisualIndicator(altCellList: AltCellList, cell: MarkdownCell, applyIndic: boolean) {
+function applyVisualIndicator(altCellList: AltCellList, cell: MarkdownCell, listIssues: string[]) {
   const indicatorId = `accessibility-indicator-${cell.model.id}`;
 
+  let applyIndic = false;
+  for (let i = 0; i < listIssues.length; i++) {
+    if (listIssues[i] == "Alt") {
+      altCellList.addCell(cell.model.id, "Cell Error: Missing Alt Tag");
+      applyIndic = true;
+    } else {
+      var score = Number(listIssues[i]);
+      if (score < 4.5) {
+        altCellList.addCell(cell.model.id, "Cell Error: Low Image Visibility");
+        applyIndic = true;
+      }
+    }
+  }
+  
   if (applyIndic) {
     let indicator = document.createElement('div');
     indicator.id = indicatorId;
@@ -65,7 +96,7 @@ function applyVisualIndicator(altCellList: AltCellList, cell: MarkdownCell, appl
     indicator.style.borderRadius = '50%';
     indicator.style.backgroundColor = '#ff8080';
     cell.node.appendChild(indicator);
-    altCellList.addCell(cell.model.id, "Cell Error: Missing Alt Tag");
+    // altCellList.addCell(cell.model.id, "Cell Error: Missing Alt Tag");
   } else {
     let indicator = document.getElementById(indicatorId);
     indicator?.remove();
@@ -74,14 +105,12 @@ function applyVisualIndicator(altCellList: AltCellList, cell: MarkdownCell, appl
 
 }
 
-function addToolbarButton(labShell: ILabShell, altCellList: AltCellList, notebookPanel: NotebookPanel, isEnabled: () => boolean, toggleEnabled: () => void): IDisposable {
+async function addToolbarButton(labShell: ILabShell, altCellList: AltCellList, notebookPanel: NotebookPanel, isEnabled: () => boolean, toggleEnabled: () => void): Promise<IDisposable> {
   const button = new ToolbarButton({
-    // className: 'my-altTextCheck-button',
-    // icon: 
+
     label: '🌐 Alt Text Check',
     onClick: () => {
       toggleEnabled();
-      // updateButtonAppearance(button, isEnabled());
       if(isEnabled()){
         labShell.activateById("AltCellList");
       } else {
@@ -90,16 +119,15 @@ function addToolbarButton(labShell: ILabShell, altCellList: AltCellList, noteboo
           console.log(item);
         }
       }
-      // console.log(app.shell.children);
-      // altCellList.clearMap();
-      notebookPanel.content.widgets.forEach(cell => {
+      
+      notebookPanel.content.widgets.forEach(async cell => {
         if (cell.model.type === 'markdown') {
           const markdownCell = cell as MarkdownCell;
           if (isEnabled()) {
-            const hasImageWithoutAlt = checkMarkdownCellForImageWithoutAlt(markdownCell);
+            const hasImageWithoutAlt = await checkMarkdownCellForImageWithoutAlt(markdownCell);
             applyVisualIndicator(altCellList, markdownCell, hasImageWithoutAlt);
           } else {
-            applyVisualIndicator(altCellList, markdownCell, false);
+            applyVisualIndicator(altCellList, markdownCell, []);
           }
         }
       });
@@ -113,29 +141,9 @@ function addToolbarButton(labShell: ILabShell, altCellList: AltCellList, noteboo
   
   let elem = document.getElementById('alt-text-check-toggle');
   elem!.style.backgroundColor = '#0000';
-  // elem!.style.backgroundColor = '#123c80';
-  
-  // var div = document.createElement('div');
-  // div.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><path fill="#154F92" d="M256 48c114.953 0 208 93.029 208 208 0 114.953-93.029 208-208 208-114.953 0-208-93.029-208-208 0-114.953 93.029-208 208-208m0-40C119.033 8 8 119.033 8 256s111.033 248 248 248 248-111.033 248-248S392.967 8 256 8zm0 56C149.961 64 64 149.961 64 256s85.961 192 192 192 192-85.961 192-192S362.039 64 256 64zm0 44c19.882 0 36 16.118 36 36s-16.118 36-36 36-36-16.118-36-36 16.118-36 36-36zm117.741 98.023c-28.712 6.779-55.511 12.748-82.14 15.807.851 101.023 12.306 123.052 25.037 155.621 3.617 9.26-.957 19.698-10.217 23.315-9.261 3.617-19.699-.957-23.316-10.217-8.705-22.308-17.086-40.636-22.261-78.549h-9.686c-5.167 37.851-13.534 56.208-22.262 78.549-3.615 9.255-14.05 13.836-23.315 10.217-9.26-3.617-13.834-14.056-10.217-23.315 12.713-32.541 24.185-54.541 25.037-155.621-26.629-3.058-53.428-9.027-82.141-15.807-8.6-2.031-13.926-10.648-11.895-19.249s10.647-13.926 19.249-11.895c96.686 22.829 124.283 22.783 220.775 0 8.599-2.03 17.218 3.294 19.249 11.895 2.029 8.601-3.297 17.219-11.897 19.249z"/></svg>'.trim();
-  // let svg =  div.firstChild;
-  // if (svg != null) {
-  //   // console.log(svg[0]);
-  //   elem!.appendChild(svg);
-  // }
-  
 
   return button;
 }
-
-// function updateButtonAppearance(button: ToolbarButton, isOn: boolean) {
-//   if (!isOn) {
-//     let elem = document.getElementById('alt-text-check-toggle');
-//     elem!.style.backgroundColor = '#0000';
-//   } else {
-//     let elem = document.getElementById('alt-text-check-toggle');
-//     elem!.style.backgroundColor = '#123c80';
-//   }
-// }
 
 const plugin: JupyterFrontEndPlugin<void> = {
   id: 'jupyterlab_accessibility:plugin',
@@ -174,17 +182,17 @@ const plugin: JupyterFrontEndPlugin<void> = {
         const { content } = notebookPanel;
 
         //for each existing cell, attach a content changed listener
-        content.widgets.forEach(cell => {
+        content.widgets.forEach(async cell => {
           if (cell.model.type === 'markdown') {
             const markdownCell = cell as MarkdownCell;
             attachContentChangedListener(altCellList, markdownCell, () => isEnabled);
             
             //for each existing cell, check the accessibility once to initially flag it or not
             if (isEnabled) {
-              const hasImageWithoutAlt = checkMarkdownCellForImageWithoutAlt(markdownCell);
+              const hasImageWithoutAlt = await checkMarkdownCellForImageWithoutAlt(markdownCell);
               applyVisualIndicator(altCellList, markdownCell, hasImageWithoutAlt);
             } else {
-              applyVisualIndicator(altCellList, markdownCell, false);
+              applyVisualIndicator(altCellList, markdownCell, []);
             }
           }
         });
@@ -210,12 +218,12 @@ const plugin: JupyterFrontEndPlugin<void> = {
 class AltCellList extends Widget {
   
   private _listCells: HTMLElement;
-  private _cellMap: Map<string, HTMLElement>;
+  private _cellMap: Map<string, HTMLElement[]>;
   private _notebookTracker: INotebookTracker;
 
   constructor(notebookTracker: INotebookTracker) {
     super();
-    this._cellMap = new Map<string, HTMLElement>();
+    this._cellMap = new Map<string, HTMLElement[]>();
     this._listCells = document.createElement('div');
     // this._listCells.style.textAlign = 'center';
     this._notebookTracker = notebookTracker;
@@ -230,7 +238,7 @@ class AltCellList extends Widget {
   }
 
   addCell(cellId: string, buttonContent: string): void {
-    if (!this._cellMap.has(cellId)) {
+    // if (!this._cellMap.has(cellId)) {
       const listItem = document.createElement('div');
       listItem.id = `cell-${cellId}`;
       // listItem.style.listStyleType = 'None';
@@ -252,14 +260,29 @@ class AltCellList extends Widget {
       
       listItem.appendChild(button);
       this._listCells.appendChild(listItem);
-      this._cellMap.set(cellId, listItem);
-    }
+
+
+      if (this._cellMap.has(cellId)){
+        var existingList = this._cellMap.get(cellId)
+        existingList!.push(listItem)
+        this._cellMap.set(cellId, existingList!);
+      } else {
+        this._cellMap.set(cellId, [listItem]);
+      }
+      
+    // }
   }
 
   removeCell(cellId: string): void {
     const listItem = this._cellMap.get(cellId);
-    if (listItem) {
-      this._listCells.removeChild(listItem);
+    if (listItem != null){
+      listItem.forEach((btn) => {
+        if (btn) {
+          this._listCells.removeChild(btn);
+        }
+      });
+    }
+    if(this._cellMap.has(cellId)){
       this._cellMap.delete(cellId);
     }
   }
@@ -275,11 +298,11 @@ class AltCellList extends Widget {
 
         const originalStyle = cell.node.style.transition;
         cell.node.style.transition = 'background-color 0.5s ease';
-        cell.node.style.backgroundColor = '#ffff99'; // Flash color
+        cell.node.style.backgroundColor = '#ffff99';
         setTimeout(() => {
-          cell.node.style.backgroundColor = ''; // Revert to original color
+          cell.node.style.backgroundColor = '';
           cell.node.style.transition = originalStyle;
-        }, 500); // Flash duration
+        }, 800); // Flash duration
       }
     }
   }
@@ -291,17 +314,3 @@ class AltCellList extends Widget {
 }
 
 export default plugin;
-
-
-
-      // const button = document.createElement('button');
-      // button.textContent = buttonContent;
-      // button.style.margin = '3px';
-      // button.style.padding = '10px'
-      // button.style.backgroundColor = '#5c94ed';
-      // button.style.border = 'none';
-      // button.style.color = 'white';
-      // button.style.textAlign = 'center';
-      // button.style.textDecoration = 'none';
-      // button.style.fontSize = '16px';
-      // button.style.cursor = 'pointer';
