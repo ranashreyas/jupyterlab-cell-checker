@@ -1,4 +1,5 @@
 import {
+  ILabShell,
   JupyterFrontEnd,
   JupyterFrontEndPlugin
 } from '@jupyterlab/application';
@@ -6,10 +7,10 @@ import {
 import { INotebookTracker, NotebookPanel } from '@jupyterlab/notebook';
 import { ToolbarButton } from '@jupyterlab/apputils';
 import { MarkdownCell, ICellModel } from '@jupyterlab/cells';
-import { IMainMenu } from '@jupyterlab/mainmenu';
 import { IDisposable } from '@lumino/disposable';
-import { IStatusBar } from '@jupyterlab/statusbar';
 import { Widget } from '@lumino/widgets';
+import { LabIcon } from '@jupyterlab/ui-components';
+
 
 
 function checkHtmlNoAlt(htmlString: string): boolean {
@@ -50,7 +51,6 @@ function attachContentChangedListener(altCellList: AltCellList, cell: MarkdownCe
   });
 }
 
-
 function applyVisualIndicator(altCellList: AltCellList, cell: MarkdownCell, applyIndic: boolean) {
   const indicatorId = `accessibility-indicator-${cell.model.id}`;
 
@@ -65,7 +65,7 @@ function applyVisualIndicator(altCellList: AltCellList, cell: MarkdownCell, appl
     indicator.style.borderRadius = '50%';
     indicator.style.backgroundColor = '#ff8080';
     cell.node.appendChild(indicator);
-    altCellList.addCell(cell.model.id);
+    altCellList.addCell(cell.model.id, "Cell Error: Missing Alt Tag");
   } else {
     let indicator = document.getElementById(indicatorId);
     indicator?.remove();
@@ -74,13 +74,24 @@ function applyVisualIndicator(altCellList: AltCellList, cell: MarkdownCell, appl
 
 }
 
-function addToolbarButton(altCellList: AltCellList, notebookPanel: NotebookPanel, isEnabled: () => boolean, toggleEnabled: () => void): IDisposable {
+function addToolbarButton(labShell: ILabShell, altCellList: AltCellList, notebookPanel: NotebookPanel, isEnabled: () => boolean, toggleEnabled: () => void): IDisposable {
   const button = new ToolbarButton({
     // className: 'my-altTextCheck-button',
-    label: 'Alt Text Check',
+    // icon: 
+    label: '🌐 Alt Text Check',
     onClick: () => {
       toggleEnabled();
-      updateButtonAppearance(button, isEnabled());
+      // updateButtonAppearance(button, isEnabled());
+      if(isEnabled()){
+        labShell.activateById("AltCellList");
+      } else {
+        labShell.collapseRight();
+        for (const item of labShell.children()) {
+          console.log(item);
+        }
+      }
+      // console.log(app.shell.children);
+      // altCellList.clearMap();
       notebookPanel.content.widgets.forEach(cell => {
         if (cell.model.type === 'markdown') {
           const markdownCell = cell as MarkdownCell;
@@ -102,25 +113,35 @@ function addToolbarButton(altCellList: AltCellList, notebookPanel: NotebookPanel
   
   let elem = document.getElementById('alt-text-check-toggle');
   elem!.style.backgroundColor = '#0000';
+  // elem!.style.backgroundColor = '#123c80';
+  
+  // var div = document.createElement('div');
+  // div.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><path fill="#154F92" d="M256 48c114.953 0 208 93.029 208 208 0 114.953-93.029 208-208 208-114.953 0-208-93.029-208-208 0-114.953 93.029-208 208-208m0-40C119.033 8 8 119.033 8 256s111.033 248 248 248 248-111.033 248-248S392.967 8 256 8zm0 56C149.961 64 64 149.961 64 256s85.961 192 192 192 192-85.961 192-192S362.039 64 256 64zm0 44c19.882 0 36 16.118 36 36s-16.118 36-36 36-36-16.118-36-36 16.118-36 36-36zm117.741 98.023c-28.712 6.779-55.511 12.748-82.14 15.807.851 101.023 12.306 123.052 25.037 155.621 3.617 9.26-.957 19.698-10.217 23.315-9.261 3.617-19.699-.957-23.316-10.217-8.705-22.308-17.086-40.636-22.261-78.549h-9.686c-5.167 37.851-13.534 56.208-22.262 78.549-3.615 9.255-14.05 13.836-23.315 10.217-9.26-3.617-13.834-14.056-10.217-23.315 12.713-32.541 24.185-54.541 25.037-155.621-26.629-3.058-53.428-9.027-82.141-15.807-8.6-2.031-13.926-10.648-11.895-19.249s10.647-13.926 19.249-11.895c96.686 22.829 124.283 22.783 220.775 0 8.599-2.03 17.218 3.294 19.249 11.895 2.029 8.601-3.297 17.219-11.897 19.249z"/></svg>'.trim();
+  // let svg =  div.firstChild;
+  // if (svg != null) {
+  //   // console.log(svg[0]);
+  //   elem!.appendChild(svg);
+  // }
+  
 
   return button;
 }
 
-function updateButtonAppearance(button: ToolbarButton, isOn: boolean) {
-  if (!isOn) {
-    let elem = document.getElementById('alt-text-check-toggle');
-    elem!.style.backgroundColor = '#5c94ed';
-  } else {
-    let elem = document.getElementById('alt-text-check-toggle');
-    elem!.style.backgroundColor = '#0000';
-  }
-}
+// function updateButtonAppearance(button: ToolbarButton, isOn: boolean) {
+//   if (!isOn) {
+//     let elem = document.getElementById('alt-text-check-toggle');
+//     elem!.style.backgroundColor = '#0000';
+//   } else {
+//     let elem = document.getElementById('alt-text-check-toggle');
+//     elem!.style.backgroundColor = '#123c80';
+//   }
+// }
 
 const plugin: JupyterFrontEndPlugin<void> = {
   id: 'jupyterlab_accessibility:plugin',
   autoStart: true,
-  requires: [INotebookTracker, IMainMenu, IStatusBar],
-  activate: (app: JupyterFrontEnd, notebookTracker: INotebookTracker, mainMenu: IMainMenu, statusBar: IStatusBar | null) => {
+  requires: [INotebookTracker, ILabShell],
+  activate: (app: JupyterFrontEnd, notebookTracker: INotebookTracker, labShell: ILabShell) => {
     console.log('JupyterLab extension jupyterlab_accessibility is activated!');
 
     let isEnabled = true;
@@ -130,13 +151,20 @@ const plugin: JupyterFrontEndPlugin<void> = {
       console.log(`Accessibility checks ${isEnabled ? 'enabled' : 'disabled'}.`);
     };
 
+    const accessibilityIcon = new LabIcon({
+      name: 'accessibility',
+      svgstr: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><path fill="#154F92" d="M256 48c114.953 0 208 93.029 208 208 0 114.953-93.029 208-208 208-114.953 0-208-93.029-208-208 0-114.953 93.029-208 208-208m0-40C119.033 8 8 119.033 8 256s111.033 248 248 248 248-111.033 248-248S392.967 8 256 8zm0 56C149.961 64 64 149.961 64 256s85.961 192 192 192 192-85.961 192-192S362.039 64 256 64zm0 44c19.882 0 36 16.118 36 36s-16.118 36-36 36-36-16.118-36-36 16.118-36 36-36zm117.741 98.023c-28.712 6.779-55.511 12.748-82.14 15.807.851 101.023 12.306 123.052 25.037 155.621 3.617 9.26-.957 19.698-10.217 23.315-9.261 3.617-19.699-.957-23.316-10.217-8.705-22.308-17.086-40.636-22.261-78.549h-9.686c-5.167 37.851-13.534 56.208-22.262 78.549-3.615 9.255-14.05 13.836-23.315 10.217-9.26-3.617-13.834-14.056-10.217-23.315 12.713-32.541 24.185-54.541 25.037-155.621-26.629-3.058-53.428-9.027-82.141-15.807-8.6-2.031-13.926-10.648-11.895-19.249s10.647-13.926 19.249-11.895c96.686 22.829 124.283 22.783 220.775 0 8.599-2.03 17.218 3.294 19.249 11.895 2.029 8.601-3.297 17.219-11.897 19.249z"/></svg>'
+    });
+
     const altCellList: AltCellList = new AltCellList(notebookTracker);
-    altCellList.id = 'JupyterShoutWidget'; // Widgets need an id
-    app.shell.add(altCellList, 'right');
+    altCellList.id = 'AltCellList'; // Widgets need an id
+    altCellList.title.icon = accessibilityIcon;
+    labShell.add(altCellList, 'right');
+    labShell.activateById('AltCellList');
     
     // When a new notebook is created or opened, add the toolbar button
     notebookTracker.widgetAdded.connect((sender, notebookPanel: NotebookPanel) => {
-      addToolbarButton(altCellList, notebookPanel, () => isEnabled, toggleEnabled);
+      addToolbarButton(labShell, altCellList, notebookPanel, () => isEnabled, toggleEnabled);
     });
 
     notebookTracker.currentChanged.connect((sender, notebookPanel) => {
@@ -188,20 +216,36 @@ class AltCellList extends Widget {
   constructor(notebookTracker: INotebookTracker) {
     super();
     this._cellMap = new Map<string, HTMLElement>();
-    this._listCells = document.createElement('ul');
+    this._listCells = document.createElement('div');
+    // this._listCells.style.textAlign = 'center';
     this._notebookTracker = notebookTracker;
+
+    let title = document.createElement('h2');
+    title.innerHTML = "Cells with Accessibility Issues";
+    title.style.margin = '15px';
+    // title.style.textAlign = 'center';
+
+    this.node.appendChild(title);
     this.node.appendChild(this._listCells);
   }
 
-  addCell(cellId: string): void {
+  addCell(cellId: string, buttonContent: string): void {
     if (!this._cellMap.has(cellId)) {
-      const listItem = document.createElement('li');
+      const listItem = document.createElement('div');
       listItem.id = `cell-${cellId}`;
-      listItem.style.listStyleType = 'None';
+      // listItem.style.listStyleType = 'None';
 
       const button = document.createElement('button');
-      button.textContent = "Cell Id: " + cellId.slice(0,5);
+      button.classList.add("jp-toast-button");
+      button.classList.add("jp-mod-link");
+      button.classList.add("jp-mod-small");
+      button.classList.add("jp-Button");
       button.style.margin = '5px';
+      button.style.marginRight = '15px';
+      button.style.marginLeft = '15px';
+      button.style.width = "-webkit-fill-available";
+      button.textContent = buttonContent;
+
       button.addEventListener('click', () => {
         this.scrollToCell(cellId);
       });
@@ -228,10 +272,36 @@ class AltCellList extends Widget {
       const cell = notebook.widgets[i];
       if (cell.model.id === cellId) {
         cell.node.scrollIntoView({ behavior: 'smooth', block: 'center' });
+
+        const originalStyle = cell.node.style.transition;
+        cell.node.style.transition = 'background-color 0.5s ease';
+        cell.node.style.backgroundColor = '#ffff99'; // Flash color
+        setTimeout(() => {
+          cell.node.style.backgroundColor = ''; // Revert to original color
+          cell.node.style.transition = originalStyle;
+        }, 500); // Flash duration
       }
     }
+  }
+
+  clearMap(): void {
+    this._cellMap.clear();
   }
   
 }
 
 export default plugin;
+
+
+
+      // const button = document.createElement('button');
+      // button.textContent = buttonContent;
+      // button.style.margin = '3px';
+      // button.style.padding = '10px'
+      // button.style.backgroundColor = '#5c94ed';
+      // button.style.border = 'none';
+      // button.style.color = 'white';
+      // button.style.textAlign = 'center';
+      // button.style.textDecoration = 'none';
+      // button.style.fontSize = '16px';
+      // button.style.cursor = 'pointer';
