@@ -108,7 +108,7 @@ function applyVisualIndicator(altCellList: AltCellList, cell: MarkdownCell, list
 async function addToolbarButton(labShell: ILabShell, altCellList: AltCellList, notebookPanel: NotebookPanel, isEnabled: () => boolean, toggleEnabled: () => void): Promise<IDisposable> {
   const button = new ToolbarButton({
 
-    label: '🌐 Alt Text Check',
+    label: '🌐 Check Alt-Text',
     onClick: () => {
       toggleEnabled();
       if(isEnabled()){
@@ -251,7 +251,7 @@ class AltCellList extends Widget {
       button.style.margin = '5px';
       button.style.marginRight = '15px';
       button.style.marginLeft = '15px';
-      button.style.width = "-webkit-fill-available";
+      // button.style.width = "-webkit-fill-available";
       button.textContent = buttonContent;
 
       button.addEventListener('click', () => {
