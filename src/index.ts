@@ -40,19 +40,38 @@ async function checkHtmlNoAlt(htmlString: string): Promise<string[]> {
   return accessibilityTests;
 }
 
-function checkMDNoAlt(mdString: string): string[] {
-  const imageRegex = /!\[\](\([^)]+\))/g;
-  if (imageRegex.test(mdString)){
-    return ["Alt"];
-  } else {
-    return [];
+async function checkMDNoAlt(mdString: string): Promise<string[]> {
+  const imageNoAltRegex = /!\[\](\([^)]+\))/g;
+  const allImagesRegex = /!\[.*?\]\((.*?)\)/g;
+  let accessibilityTests: string[] = [];
+
+  let match: RegExpExecArray | null;
+  const imageUrls: string[] = [];
+
+  while ((match = allImagesRegex.exec(mdString)) !== null) {
+      const imageUrl = match[1];
+      if (imageUrl) {
+          imageUrls.push(imageUrl);
+      }
   }
+
+
+  if (imageNoAltRegex.test(mdString)){
+    accessibilityTests.push("Alt")
+  }
+
+  const randomNumberPromises = Array.from(imageUrls).map(() => waitForRandomTimeAndGetRandomNumber());
+  const randomNumbers = await Promise.all(randomNumberPromises);
+
+  accessibilityTests = [...accessibilityTests, ...randomNumbers.map(String)];
+
+  return accessibilityTests;
 }
 
 async function checkMarkdownCellForImageWithoutAlt(cell: MarkdownCell): Promise<string[]> {
   const cellText = cell.model.toJSON().source.toString();
 
-  const markdownNoAlt = checkMDNoAlt(cellText);
+  const markdownNoAlt = await checkMDNoAlt(cellText);
   const htmlNoAlt = await checkHtmlNoAlt(cellText);
   return htmlNoAlt.concat(markdownNoAlt);
 }
@@ -69,7 +88,12 @@ async function attachContentChangedListener(altCellList: AltCellList, cell: Mark
 }
 
 function applyVisualIndicator(altCellList: AltCellList, cell: MarkdownCell, listIssues: string[]) {
-  const indicatorId = `accessibility-indicator-${cell.model.id}`;
+  const indicatorId = 'accessibility-indicator-' + cell.model.id;
+
+
+  console.log(listIssues);
+
+  altCellList.removeCell(cell.model.id);
 
   let applyIndic = false;
   for (let i = 0; i < listIssues.length; i++) {
@@ -86,17 +110,19 @@ function applyVisualIndicator(altCellList: AltCellList, cell: MarkdownCell, list
   }
   
   if (applyIndic) {
-    let indicator = document.createElement('div');
-    indicator.id = indicatorId;
-    indicator.style.position = 'absolute';
-    indicator.style.top = '12px';
-    indicator.style.left = '44px';
-    indicator.style.width = '15px';
-    indicator.style.height = '15px';
-    indicator.style.borderRadius = '50%';
-    indicator.style.backgroundColor = '#ff8080';
-    cell.node.appendChild(indicator);
-    // altCellList.addCell(cell.model.id, "Cell Error: Missing Alt Tag");
+
+    if (!document.getElementById(indicatorId)) {
+      let indicator = document.createElement('div');
+      indicator.id = indicatorId;
+      indicator.style.position = 'absolute';
+      indicator.style.top = '12px';
+      indicator.style.left = '44px';
+      indicator.style.width = '15px';
+      indicator.style.height = '15px';
+      indicator.style.borderRadius = '50%';
+      indicator.style.backgroundColor = '#ff8080';
+      cell.node.appendChild(indicator);
+    }
   } else {
     let indicator = document.getElementById(indicatorId);
     indicator?.remove();
@@ -115,9 +141,6 @@ async function addToolbarButton(labShell: ILabShell, altCellList: AltCellList, n
         labShell.activateById("AltCellList");
       } else {
         labShell.collapseRight();
-        for (const item of labShell.children()) {
-          console.log(item);
-        }
       }
       
       notebookPanel.content.widgets.forEach(async cell => {
@@ -144,6 +167,22 @@ async function addToolbarButton(labShell: ILabShell, altCellList: AltCellList, n
 
   return button;
 }
+
+// function getImageAndCellColors(cell: MarkdownCell): void {
+//   console.log(cell.node);
+//   var imgs = cell.node.querySelectorAll('img');
+//   console.log(imgs.length);
+
+//   if (imgs.length >= 1) {
+//     imgs.forEach(img => {
+//       var elem = img as HTMLImageElement
+//       console.log(elem)
+//     });
+  
+//     // const cellStyle = window.getComputedStyle(cell.node);
+//     // console.log('Cell background color:', cellStyle.backgroundColor);
+//   }
+// }
 
 const plugin: JupyterFrontEndPlugin<void> = {
   id: 'jupyterlab_accessibility:plugin',
@@ -186,7 +225,9 @@ const plugin: JupyterFrontEndPlugin<void> = {
           if (cell.model.type === 'markdown') {
             const markdownCell = cell as MarkdownCell;
             attachContentChangedListener(altCellList, markdownCell, () => isEnabled);
-            
+
+            // await getImageAndCellColors(markdownCell);
+
             //for each existing cell, check the accessibility once to initially flag it or not
             if (isEnabled) {
               const hasImageWithoutAlt = await checkMarkdownCellForImageWithoutAlt(markdownCell);
@@ -225,23 +266,19 @@ class AltCellList extends Widget {
     super();
     this._cellMap = new Map<string, HTMLElement[]>();
     this._listCells = document.createElement('div');
-    // this._listCells.style.textAlign = 'center';
     this._notebookTracker = notebookTracker;
 
     let title = document.createElement('h2');
     title.innerHTML = "Cells with Accessibility Issues";
     title.style.margin = '15px';
-    // title.style.textAlign = 'center';
 
     this.node.appendChild(title);
     this.node.appendChild(this._listCells);
   }
 
   addCell(cellId: string, buttonContent: string): void {
-    // if (!this._cellMap.has(cellId)) {
       const listItem = document.createElement('div');
-      listItem.id = `cell-${cellId}`;
-      // listItem.style.listStyleType = 'None';
+      listItem.id = 'cell-' + cellId + "_" + buttonContent;
 
       const button = document.createElement('button');
       button.classList.add("jp-toast-button");
@@ -251,35 +288,52 @@ class AltCellList extends Widget {
       button.style.margin = '5px';
       button.style.marginRight = '15px';
       button.style.marginLeft = '15px';
-      // button.style.width = "-webkit-fill-available";
       button.textContent = buttonContent;
 
       button.addEventListener('click', () => {
         this.scrollToCell(cellId);
       });
-      
-      listItem.appendChild(button);
-      this._listCells.appendChild(listItem);
 
+
+      var add = true;
 
       if (this._cellMap.has(cellId)){
+        
         var existingList = this._cellMap.get(cellId)
+
+        existingList!.forEach(b => {          
+          if (b.textContent == buttonContent) {
+            add = false;
+          }
+        })
+
         existingList!.push(listItem)
         this._cellMap.set(cellId, existingList!);
       } else {
         this._cellMap.set(cellId, [listItem]);
       }
+
+      if (add) {
+        listItem.appendChild(button);
+        this._listCells.appendChild(listItem);
+      }
       
-    // }
+      
   }
 
   removeCell(cellId: string): void {
+    //get list of error buttons related to this cell
     const listItem = this._cellMap.get(cellId);
+
     if (listItem != null){
       listItem.forEach((btn) => {
-        if (btn) {
+
+      for (let item of this._listCells.children) {
+        if (btn.id == item.id) {
           this._listCells.removeChild(btn);
         }
+      }
+          
       });
     }
     if(this._cellMap.has(cellId)){
