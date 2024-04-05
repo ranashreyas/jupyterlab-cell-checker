@@ -89,10 +89,6 @@ async function attachContentChangedListener(altCellList: AltCellList, cell: Mark
 
 function applyVisualIndicator(altCellList: AltCellList, cell: MarkdownCell, listIssues: string[]) {
   const indicatorId = 'accessibility-indicator-' + cell.model.id;
-
-
-  console.log(listIssues);
-
   altCellList.removeCell(cell.model.id);
 
   let applyIndic = false;
@@ -169,19 +165,44 @@ async function addToolbarButton(labShell: ILabShell, altCellList: AltCellList, n
 }
 
 // function getImageAndCellColors(cell: MarkdownCell): void {
-//   console.log(cell.node);
-//   var imgs = cell.node.querySelectorAll('img');
-//   console.log(imgs.length);
 
-//   if (imgs.length >= 1) {
-//     imgs.forEach(img => {
-//       var elem = img as HTMLImageElement
-//       console.log(elem)
-//     });
-  
-//     // const cellStyle = window.getComputedStyle(cell.node);
-//     // console.log('Cell background color:', cellStyle.backgroundColor);
+//   while(true){
+//     console.log("wait rendering")
+//     if(cell.rendered){
+//       break
+//     }
 //   }
+
+//   console.log(cell.node);
+//   console.log(cell.node.childNodes);
+//   console.log(cell.node.childNodes.keys().next());
+//   console.log(cell.node.childNodes.values().next());
+//   const markdownOutputElement = cell.node.querySelector('.jp-MarkdownOutput');
+  
+//   if (markdownOutputElement) {
+//     const images = markdownOutputElement.querySelectorAll('img');
+//     console.log(Array.from(images))
+//   }
+
+//   // const cellNode = cell.node
+//   // console.log(cellNode);
+//   // console.log(cellNode.children);
+//   // console.log(cellNode.children[1]);
+//   // // console.log(cell.node.children[1].children[1].children[2].children);
+  
+
+//   // var imgs = Array.from(cell.node.querySelectorAll('img'));
+//   // console.log(imgs.length);
+
+//   // if (imgs.length >= 1) {
+//   //   imgs.forEach(img => {
+//   //     var elem = img as HTMLImageElement
+//   //     console.log(elem)
+//   //   });
+  
+//   //   // const cellStyle = window.getComputedStyle(cell.node);
+//   //   // console.log('Cell background color:', cellStyle.backgroundColor);
+//   // }
 // }
 
 const plugin: JupyterFrontEndPlugin<void> = {
