@@ -6,7 +6,7 @@ import {
 
 import { INotebookTracker, NotebookPanel } from '@jupyterlab/notebook';
 import { ToolbarButton } from '@jupyterlab/apputils';
-import { MarkdownCell, ICellModel } from '@jupyterlab/cells';
+import { MarkdownCell, ICellModel, CodeCell, Cell } from '@jupyterlab/cells';
 import { IDisposable } from '@lumino/disposable';
 import { Widget } from '@lumino/widgets';
 import { LabIcon } from '@jupyterlab/ui-components';
@@ -17,16 +17,14 @@ function getImageTransparency(imgString: string, notebookPath: string): Promise<
     img.crossOrigin = 'Anonymous'; // Needed for CORS-compliant images
 
     try {
-      new URL(imgString); //if it is linked from the internet
+      new URL(imgString);
       img.src = imgString;
     } catch (_) {
       const baseUrl = document.location.origin;
       var finalPath = `${baseUrl}/files/${imgString}`
-      console.log(finalPath);
+      // console.log(finalPath);
       img.src = finalPath;
     }
-  
-
 
     img.onload = () => {
       const canvas = document.createElement('canvas');
@@ -54,31 +52,27 @@ function getImageTransparency(imgString: string, notebookPath: string): Promise<
       }
 
       const transparencyPercentage = (transparentPixelCount / totalPixels) * 100;
-      console.log(transparencyPercentage);
+      console.log(10 - transparencyPercentage/10);
       
-      if (transparencyPercentage > 20) {
-        resolve(1);
-      } else {
-        resolve(10);
-      }
+      resolve(10 - transparencyPercentage/10)
     };
 
     img.onerror = () => reject('Failed to load image');
   });
 }
 
-
-async function checkHtmlNoAlt(htmlString: string, myPath: string): Promise<string[]> {
+async function checkHtmlNoAlt(htmlString: string, myPath: string, isCodeCellOutput: boolean): Promise<string[]> {
   const parser = new DOMParser();
   const doc = parser.parseFromString(htmlString, "text/html");
   const images = doc.querySelectorAll("img");
 
   let accessibilityTests: string[] = [];
-
-  for (let i = 0; i < images.length; i++) {
-    const img = images[i];
-    if (!img.hasAttribute("alt") || img.getAttribute("alt") === "") {
-      accessibilityTests.push("Alt");
+  if(!isCodeCellOutput){
+    for (let i = 0; i < images.length; i++) {
+      const img = images[i];
+      if (!img.hasAttribute("alt") || img.getAttribute("alt") === "") {
+        accessibilityTests.push("Alt");
+      }
     }
   }
 
@@ -118,21 +112,42 @@ async function checkMDNoAlt(mdString: string, myPath: string): Promise<string[]>
   return accessibilityTests;
 }
 
-async function checkMarkdownCellForImageWithoutAlt(cell: MarkdownCell, myPath: string): Promise<string[]> {
-  const cellText = cell.model.toJSON().source.toString();
+async function checkMarkdownCellForImageWithoutAlt(cell: Cell, myPath: string): Promise<string[]> {
+  if(cell.model.type == 'markdown'){
+    cell = cell as MarkdownCell;
+    const cellText = cell.model.toJSON().source.toString();
 
-  const markdownNoAlt = await checkMDNoAlt(cellText, myPath);
-  const htmlNoAlt = await checkHtmlNoAlt(cellText, myPath);
-  var issues = htmlNoAlt.concat(markdownNoAlt)
-  return issues;
+    const markdownNoAlt = await checkMDNoAlt(cellText, myPath);
+    const htmlNoAlt = await checkHtmlNoAlt(cellText, myPath, false);
+    var issues = htmlNoAlt.concat(markdownNoAlt)
+    return issues;
+  } else {
+    return [];
+  }
 }
 
-async function attachContentChangedListener(altCellList: AltCellList, cell: MarkdownCell, isEnabled: () => boolean, myPath: string) {
+async function checkCodeCellForImageWithTransparency(cell: Cell, myPath: string): Promise<string[]> {
+  if(cell.model.type == 'code'){
+    const codeCell = cell as CodeCell;
+    const outputText = codeCell.outputArea.node.outerHTML;
+
+    const htmlTransparancyIssues = await checkHtmlNoAlt(outputText, myPath, true);
+    return htmlTransparancyIssues;
+  } else {
+    return [];
+  }
+  
+}
+
+async function attachContentChangedListener(altCellList: AltCellList, cell: Cell, isEnabled: () => boolean, myPath: string) {
   cell.model.contentChanged.connect(async (sender, args) => {
 
     if (isEnabled()){
-      const hasImageWithoutAlt = await checkMarkdownCellForImageWithoutAlt(cell, myPath);
-      applyVisualIndicator(altCellList, cell, hasImageWithoutAlt);
+      const mdCellIssues = await checkMarkdownCellForImageWithoutAlt(cell, myPath);
+      const hasImageWithoutAlt = await checkCodeCellForImageWithTransparency(cell, myPath);
+      var issues = mdCellIssues.concat(hasImageWithoutAlt)
+
+      applyVisualIndicator(altCellList, cell, issues);
     } else {
       applyVisualIndicator(altCellList, cell, []);
     }
@@ -140,7 +155,7 @@ async function attachContentChangedListener(altCellList: AltCellList, cell: Mark
   
 }
 
-function applyVisualIndicator(altCellList: AltCellList, cell: MarkdownCell, listIssues: string[]) {
+function applyVisualIndicator(altCellList: AltCellList, cell: Cell, listIssues: string[]) {
   const indicatorId = 'accessibility-indicator-' + cell.model.id;
   altCellList.removeCell(cell.model.id);
 
@@ -151,7 +166,7 @@ function applyVisualIndicator(altCellList: AltCellList, cell: MarkdownCell, list
       applyIndic = true;
     } else {
       var score = Number(listIssues[i]);
-      if (score < 4.5) {
+      if (score < 9) {
         altCellList.addCell(cell.model.id, "Cell Error: Low Image Visibility");
         applyIndic = true;
       }
@@ -164,8 +179,8 @@ function applyVisualIndicator(altCellList: AltCellList, cell: MarkdownCell, list
       let indicator = document.createElement('div');
       indicator.id = indicatorId;
       indicator.style.position = 'absolute';
-      indicator.style.top = '12px';
-      indicator.style.left = '44px';
+      indicator.style.top = '30px';
+      indicator.style.left = '45px';
       indicator.style.width = '15px';
       indicator.style.height = '15px';
       indicator.style.borderRadius = '50%';
@@ -196,15 +211,17 @@ async function addToolbarButton(labShell: ILabShell, altCellList: AltCellList, n
       }
       
       notebookPanel.content.widgets.forEach(async cell => {
-        if (cell.model.type === 'markdown') {
-          const markdownCell = cell as MarkdownCell;
-          if (isEnabled()) {
-            const hasImageWithoutAlt = await checkMarkdownCellForImageWithoutAlt(markdownCell, myPath);
-            applyVisualIndicator(altCellList, markdownCell, hasImageWithoutAlt);
-          } else {
-            applyVisualIndicator(altCellList, markdownCell, []);
-          }
+        
+        if (isEnabled()){
+          const mdCellIssues = await checkMarkdownCellForImageWithoutAlt(cell, myPath);
+          const hasImageWithoutAlt = await checkCodeCellForImageWithTransparency(cell, myPath);
+          var issues = mdCellIssues.concat(hasImageWithoutAlt)
+    
+          applyVisualIndicator(altCellList, cell, issues);
+        } else {
+          applyVisualIndicator(altCellList, cell, []);
         }
+
       });
     },
 
@@ -251,6 +268,7 @@ const plugin: JupyterFrontEndPlugin<void> = {
       
       // When a new notebook is created or opened, add the toolbar button
       notebookTracker.widgetAdded.connect((sender, notebookPanel: NotebookPanel) => {
+        console.log("able to add toolbar button");
         addToolbarButton(labShell, altCellList, notebookPanel, () => isEnabled, toggleEnabled, notebookTracker.currentWidget!.context.path);
       });
 
@@ -262,18 +280,21 @@ const plugin: JupyterFrontEndPlugin<void> = {
 
           //for each existing cell, attach a content changed listener
           content.widgets.forEach(async cell => {
-            if (cell.model.type === 'markdown') {
-              const markdownCell = cell as MarkdownCell;
-              attachContentChangedListener(altCellList, markdownCell, () => isEnabled, notebookTracker.currentWidget!.context.path);
+        
+          
+            attachContentChangedListener(altCellList, cell, () => isEnabled, notebookTracker.currentWidget!.context.path);
 
-              //for each existing cell, check the accessibility once to initially flag it or not
-              if (isEnabled) {
-                const hasImageWithoutAlt = await checkMarkdownCellForImageWithoutAlt(markdownCell, notebookTracker.currentWidget!.context.path);
-                applyVisualIndicator(altCellList, markdownCell, hasImageWithoutAlt, );
-              } else {
-                applyVisualIndicator(altCellList, markdownCell, []);
-              }
+            //for each existing cell, check the accessibility once to initially flag it or not
+            if (isEnabled){
+              const mdCellIssues = await checkMarkdownCellForImageWithoutAlt(cell, notebookTracker.currentWidget!.context.path);
+              const hasImageWithoutAlt = await checkCodeCellForImageWithTransparency(cell, notebookTracker.currentWidget!.context.path);
+              var issues = mdCellIssues.concat(hasImageWithoutAlt)
+        
+              applyVisualIndicator(altCellList, cell, issues);
+            } else {
+              applyVisualIndicator(altCellList, cell, []);
             }
+            
           });
 
           //every time a cell is added, attach a content listener to it
@@ -282,9 +303,10 @@ const plugin: JupyterFrontEndPlugin<void> = {
               if (args.type === 'add') {
                 args.newValues.forEach((cellModel: ICellModel) => {
                   const cell = content.widgets.find(c => c.model.id === cellModel.id);
-                  if (cell && cell.model.type === 'markdown') {
-                    attachContentChangedListener(altCellList, cell as MarkdownCell, () => isEnabled, notebookTracker.currentWidget!.context.path);
-                  }
+                  if(cell){
+                    const newCell = cell as Cell
+                    attachContentChangedListener(altCellList, newCell, () => isEnabled, notebookTracker.currentWidget!.context.path);  
+                  }          
                 });
               }
             });
@@ -398,10 +420,6 @@ class AltCellList extends Widget {
         }, 800); // Flash duration
       }
     }
-  }
-
-  clearMap(): void {
-    this._cellMap.clear();
   }
   
 }
