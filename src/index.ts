@@ -6,217 +6,53 @@ import {
 
 import { INotebookTracker, NotebookPanel} from '@jupyterlab/notebook';
 import { ToolbarButton } from '@jupyterlab/apputils';
-import { MarkdownCell, ICellModel, CodeCell, Cell } from '@jupyterlab/cells';
+import { ICellModel, Cell } from '@jupyterlab/cells';
 import { IDisposable } from '@lumino/disposable';
 import { Widget } from '@lumino/widgets';
 import { LabIcon } from '@jupyterlab/ui-components';
-
-
-function getImageContrast(imgString: string, notebookPath: string, cellColor: string): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const img = new Image();
-    img.crossOrigin = 'Anonymous'; // Needed for CORS-compliant images
-
-    try {
-      new URL(imgString);
-      img.src = imgString;
-    } catch (_) {
-      const baseUrl = document.location.origin;
-      var finalPath = `${baseUrl}/files/${imgString}`
-      // console.log(finalPath);
-      img.src = finalPath;
-    }
-
-    img.onload = () => {
-      const canvas = document.createElement('canvas');
-      canvas.width = img.width;
-      canvas.height = img.height;
-
-      const context = canvas.getContext('2d');
-      if (!context) {
-        console.log('Failed to get canvas context');
-        resolve(20 + " contrast");
-        return;
-      }
-
-      context.drawImage(img, 0, 0);
-      // const borderWidth = 3; // Width of the border
-      const imageData = context.getImageData(0, 0, img.width, img.height);
-      const data = imageData.data;
-
-      let colorCounts: { [key: string]: number } = {};
-
-      for (let i = 0; i < data.length; i += 4) {
-        // Convert each color to a string in the format "r,g,b"
-        var r = Math.floor(data[i]/10)*10;
-        var g = Math.floor(data[i+1]/10)*10;
-        var b = Math.floor(data[i+2]/10)*10;
-
-        const color = "#" + ((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1).toUpperCase();
-        if(data[i+3] < 255){
-          continue;
-        }
-
-        // Count occurrences of the color
-        if (colorCounts[color]) {
-          colorCounts[color]++;
-        } else {
-          colorCounts[color] = 1;
-        }
-      }
-
-      // Find the most frequent color
-      let dominantColor = '';
-      let maxCount = 0;
-      for (const [color, count] of Object.entries(colorCounts)) {
-        if (count > maxCount) {
-          dominantColor = color;
-          maxCount = count;
-        }
-      }
-      // console.log("Dominant Color: " + dominantColor + " vs cell color: " + cellColor);
-      fetch('https://www.aremycolorsaccessible.com/api/are-they', {
-        mode: 'cors',
-        method: 'POST',
-        body: JSON.stringify({ colors: [dominantColor, '#000000'] }),
-      })
-        .then((response) => response.json())
-        .then((json) => {
-          var contrast = (parseFloat(json["contrast"].split(":")[0])/2);
-          console.log(contrast);
-          resolve(contrast + " contrast");
-        });
-      // resolve(dominantColor);
-
-    };
-
-    img.onerror = () => reject('Failed to load image');
-  });
-}
-
-async function checkHtmlNoAccessIssues(htmlString: string, myPath: string, isCodeCellOutput: boolean, cellColor: string): Promise<string[]> {
-  const parser = new DOMParser();
-  const doc = parser.parseFromString(htmlString, "text/html");
-  const images = doc.querySelectorAll("img");
-
-  let accessibilityTests: string[] = [];
-
-  const colorContrastPromises = Array.from(images).map((img: HTMLImageElement) => getImageContrast(img.src, myPath, cellColor));
-  const colorContrast =  await Promise.all(colorContrastPromises);
-
-  accessibilityTests = [...colorContrast.map(String)];
-
-  return accessibilityTests;
-}
-
-async function checkMDNoAccessIssues(mdString: string, myPath: string, cellColor: string): Promise<string[]> {
-  // const imageNoAltRegex = /!\[\](\([^)]+\))/g;
-  const allImagesRegex = /!\[.*?\]\((.*?)\)/g;
-  let accessibilityTests: string[] = [];
-
-  let match: RegExpExecArray | null;
-  const imageUrls: string[] = [];
-
-  while ((match = allImagesRegex.exec(mdString)) !== null) {
-      const imageUrl = match[1];
-      if (imageUrl) {
-          imageUrls.push(imageUrl);
-      }
-  }
-
-  const colorContrastPromises = Array.from(imageUrls).map((i: string) => getImageContrast(i, myPath, cellColor));
-  const colorContrast = await Promise.all(colorContrastPromises);
-
-  accessibilityTests = [...colorContrast.map(String)];
-
-  return accessibilityTests;
-}
-
-async function checkMarkdownCellForImageAccessibility(cell: Cell, myPath: string): Promise<string[]> {
-  if(cell.model.type == 'markdown'){
-    cell = cell as MarkdownCell;
-    const cellText = cell.model.toJSON().source.toString();
-    // console.log(cell.node);
-    // console.log(window.getComputedStyle(cell.node));
-    // console.log(window.getComputedStyle(cell.node).backgroundColor);
-    
-    const markdownNoAlt = await checkMDNoAccessIssues(cellText, myPath, window.getComputedStyle(cell.node).backgroundColor);
-    const htmlNoAlt = await checkHtmlNoAccessIssues(cellText, myPath, false, window.getComputedStyle(cell.node).backgroundColor);
-    var issues = htmlNoAlt.concat(markdownNoAlt)
-    return issues;
-  } else {
-    return [];
-  }
-}
-
-async function checkCodeCellForImageAccessibility(cell: Cell, myPath: string): Promise<string[]> {
-  if(cell.model.type == 'code'){
-    const codeCell = cell as CodeCell;
-    const outputText = codeCell.outputArea.node.outerHTML;
-
-    const htmlAccessIssues = await checkHtmlNoAccessIssues(outputText, myPath, true, window.getComputedStyle(cell.node).backgroundColor);
-    return htmlAccessIssues;
-  } else {
-    return [];
-  }
-  
-}
 
 async function attachContentChangedListener(altCellList: AltCellList, cell: Cell, isEnabled: () => boolean, myPath: string) {
   cell.model.contentChanged.connect(async (sender, args) => {
 
     if (isEnabled()){
-      const mdCellIssues = await checkMarkdownCellForImageAccessibility(cell, myPath);
-      const codeCellIssues = await checkCodeCellForImageAccessibility(cell, myPath);
-      var issues = mdCellIssues.concat(codeCellIssues)
-
-      applyVisualIndicator(altCellList, cell, issues);
+      
     } else {
-      applyVisualIndicator(altCellList, cell, []);
+
     }
   });
   
 }
 
-function applyVisualIndicator(altCellList: AltCellList, cell: Cell, listIssues: string[]) {
-  const indicatorId = 'accessibility-indicator-' + cell.model.id;
-  altCellList.removeCell(cell.model.id);
+// function applyVisualIndicator(altCellList: AltCellList, cell: Cell, listIssues: string[]) {
+//   const indicatorId = 'accessibility-indicator-' + cell.model.id;
+//   altCellList.removeCell(cell.model.id);
 
-  let applyIndic = false;
-  for (let i = 0; i < listIssues.length; i++) {
-    if (listIssues[i] == "Alt") {
-      altCellList.addCell(cell.model.id, "Cell Error: Missing Alt Tag");
-      applyIndic = true;
-    } else {
-      var score = Number(listIssues[i].split(" ")[0]);
-      if (score < 9) {
-        altCellList.addCell(cell.model.id, "Cell Error: Low Image Contrast");
-        applyIndic = true;
-      }
-    }
-  }
+//   let applyIndic = false;
+//   for (let i = 0; i < listIssues.length; i++) {
+    
+//   }
   
-  if (applyIndic) {
+//   if (applyIndic) {
 
-    if (!document.getElementById(indicatorId)) {
-      let indicator = document.createElement('div');
-      indicator.id = indicatorId;
-      indicator.style.position = 'absolute';
-      indicator.style.top = '30px';
-      indicator.style.left = '45px';
-      indicator.style.width = '15px';
-      indicator.style.height = '15px';
-      indicator.style.borderRadius = '50%';
-      indicator.style.backgroundColor = '#ff8080';
-      cell.node.appendChild(indicator);
-    }
-  } else {
-    let indicator = document.getElementById(indicatorId);
-    indicator?.remove();
-    altCellList.removeCell(cell.model.id);
-  }
+//     if (!document.getElementById(indicatorId)) {
+//       let indicator = document.createElement('div');
+//       indicator.id = indicatorId;
+//       indicator.style.position = 'absolute';
+//       indicator.style.top = '30px';
+//       indicator.style.left = '45px';
+//       indicator.style.width = '15px';
+//       indicator.style.height = '15px';
+//       indicator.style.borderRadius = '50%';
+//       indicator.style.backgroundColor = '#ff8080';
+//       cell.node.appendChild(indicator);
+//     }
+//   } else {
+//     let indicator = document.getElementById(indicatorId);
+//     indicator?.remove();
+//     altCellList.removeCell(cell.model.id);
+//   }
 
-}
+// }
 
 async function addToolbarButton(labShell: ILabShell, altCellList: AltCellList, notebookPanel: NotebookPanel, isEnabled: () => boolean, toggleEnabled: () => void, myPath: string): Promise<IDisposable> {
   
@@ -236,13 +72,9 @@ async function addToolbarButton(labShell: ILabShell, altCellList: AltCellList, n
       notebookPanel.content.widgets.forEach(async cell => {
         
         if (isEnabled()){
-          const mdCellIssues = await checkMarkdownCellForImageAccessibility(cell, myPath);
-          const hasImageWithoutAlt = await checkCodeCellForImageAccessibility(cell, myPath);
-          var issues = mdCellIssues.concat(hasImageWithoutAlt)
-    
-          applyVisualIndicator(altCellList, cell, issues);
+          
         } else {
-          applyVisualIndicator(altCellList, cell, []);
+
         }
 
       });
@@ -310,13 +142,9 @@ const plugin: JupyterFrontEndPlugin<void> = {
 
             //for each existing cell, check the accessibility once to initially flag it or not
             if (isEnabled){
-              const mdCellIssues = await checkMarkdownCellForImageAccessibility(cell, notebookTracker.currentWidget!.context.path);
-              const hasImageWithoutAlt = await checkCodeCellForImageAccessibility(cell, notebookTracker.currentWidget!.context.path);
-              var issues = mdCellIssues.concat(hasImageWithoutAlt)
-        
-              applyVisualIndicator(altCellList, cell, issues);
+              
             } else {
-              applyVisualIndicator(altCellList, cell, []);
+
             }
             
           });
