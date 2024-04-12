@@ -11,55 +11,6 @@ import { IDisposable } from '@lumino/disposable';
 import { Widget } from '@lumino/widgets';
 import { LabIcon } from '@jupyterlab/ui-components';
 
-function getImageTransparency(imgString: string, notebookPath: string): Promise<String> {
-  return new Promise((resolve, reject) => {
-    const img = new Image();
-    img.crossOrigin = 'Anonymous'; // Needed for CORS-compliant images
-
-    try {
-      new URL(imgString);
-      img.src = imgString;
-    } catch (_) {
-      const baseUrl = document.location.origin;
-      var finalPath = `${baseUrl}/files/${imgString}`
-      // console.log(finalPath);
-      img.src = finalPath;
-    }
-
-    img.onload = () => {
-      const canvas = document.createElement('canvas');
-      canvas.width = img.width;
-      canvas.height = img.height;
-
-      const context = canvas.getContext('2d');
-      if (!context) {
-        console.log('Failed to get canvas context');
-        resolve(10 + " transp");
-        return;
-      }
-
-      context.drawImage(img, 0, 0);
-      const imageData = context.getImageData(0, 0, canvas.width, canvas.height);
-      const data = imageData.data;
-
-      let transparentPixelCount = 0;
-      const totalPixels = data.length / 4;
-
-      for (let i = 3; i < data.length; i += 4) {
-        if (data[i] < 255) {
-          transparentPixelCount++;
-        }
-      }
-
-      const transparencyPercentage = (transparentPixelCount / totalPixels) * 100;
-      // console.log(10 - transparencyPercentage/10);
-      
-      resolve((10 - transparencyPercentage/10) + " transp");
-    };
-
-    img.onerror = () => reject('Failed to load image');
-  });
-}
 
 function getImageContrast(imgString: string, notebookPath: string, cellColor: string): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -143,34 +94,23 @@ function getImageContrast(imgString: string, notebookPath: string, cellColor: st
   });
 }
 
-async function checkHtmlNoAlt(htmlString: string, myPath: string, isCodeCellOutput: boolean, cellColor: string): Promise<string[]> {
+async function checkHtmlNoAccessIssues(htmlString: string, myPath: string, isCodeCellOutput: boolean, cellColor: string): Promise<string[]> {
   const parser = new DOMParser();
   const doc = parser.parseFromString(htmlString, "text/html");
   const images = doc.querySelectorAll("img");
 
   let accessibilityTests: string[] = [];
-  if(!isCodeCellOutput){
-    for (let i = 0; i < images.length; i++) {
-      const img = images[i];
-      if (!img.hasAttribute("alt") || img.getAttribute("alt") === "") {
-        accessibilityTests.push("Alt");
-      }
-    }
-  }
 
-  const randomNumberPromises = Array.from(images).map((img: HTMLImageElement) => getImageTransparency(img.src, myPath));
-  const randomNumbers = await Promise.all(randomNumberPromises);
-
-  const colorContrastPromises = Array.from(images).map((img: HTMLImageElement) => getImageBorderColor(img.src, myPath, cellColor));
+  const colorContrastPromises = Array.from(images).map((img: HTMLImageElement) => getImageContrast(img.src, myPath, cellColor));
   const colorContrast =  await Promise.all(colorContrastPromises);
 
-  accessibilityTests = [...accessibilityTests, ...randomNumbers.map(String), ...colorContrast.map(String)];
+  accessibilityTests = [...colorContrast.map(String)];
 
   return accessibilityTests;
 }
 
-async function checkMDNoAlt(mdString: string, myPath: string, cellColor: string): Promise<string[]> {
-  const imageNoAltRegex = /!\[\](\([^)]+\))/g;
+async function checkMDNoAccessIssues(mdString: string, myPath: string, cellColor: string): Promise<string[]> {
+  // const imageNoAltRegex = /!\[\](\([^)]+\))/g;
   const allImagesRegex = /!\[.*?\]\((.*?)\)/g;
   let accessibilityTests: string[] = [];
 
@@ -184,23 +124,15 @@ async function checkMDNoAlt(mdString: string, myPath: string, cellColor: string)
       }
   }
 
-
-  if (imageNoAltRegex.test(mdString)){
-    accessibilityTests.push("Alt")
-  }
-
-  const randomNumberPromises = Array.from(imageUrls).map((i: string) => getImageTransparency(i, myPath));
-  const randomNumbers = await Promise.all(randomNumberPromises);
-
-  const colorContrastPromises = Array.from(imageUrls).map((i: string) => getImageBorderColor(i, myPath, cellColor));
+  const colorContrastPromises = Array.from(imageUrls).map((i: string) => getImageContrast(i, myPath, cellColor));
   const colorContrast = await Promise.all(colorContrastPromises);
 
-  accessibilityTests = [...accessibilityTests, ...randomNumbers.map(String), ...colorContrast.map(String)];
+  accessibilityTests = [...colorContrast.map(String)];
 
   return accessibilityTests;
 }
 
-async function checkMarkdownCellForImageWithoutAlt(cell: Cell, myPath: string): Promise<string[]> {
+async function checkMarkdownCellForImageAccessibility(cell: Cell, myPath: string): Promise<string[]> {
   if(cell.model.type == 'markdown'){
     cell = cell as MarkdownCell;
     const cellText = cell.model.toJSON().source.toString();
@@ -208,8 +140,8 @@ async function checkMarkdownCellForImageWithoutAlt(cell: Cell, myPath: string): 
     // console.log(window.getComputedStyle(cell.node));
     // console.log(window.getComputedStyle(cell.node).backgroundColor);
     
-    const markdownNoAlt = await checkMDNoAlt(cellText, myPath, window.getComputedStyle(cell.node).backgroundColor);
-    const htmlNoAlt = await checkHtmlNoAlt(cellText, myPath, false, window.getComputedStyle(cell.node).backgroundColor);
+    const markdownNoAlt = await checkMDNoAccessIssues(cellText, myPath, window.getComputedStyle(cell.node).backgroundColor);
+    const htmlNoAlt = await checkHtmlNoAccessIssues(cellText, myPath, false, window.getComputedStyle(cell.node).backgroundColor);
     var issues = htmlNoAlt.concat(markdownNoAlt)
     return issues;
   } else {
@@ -217,13 +149,13 @@ async function checkMarkdownCellForImageWithoutAlt(cell: Cell, myPath: string): 
   }
 }
 
-async function checkCodeCellForImageWithTransparency(cell: Cell, myPath: string): Promise<string[]> {
+async function checkCodeCellForImageAccessibility(cell: Cell, myPath: string): Promise<string[]> {
   if(cell.model.type == 'code'){
     const codeCell = cell as CodeCell;
     const outputText = codeCell.outputArea.node.outerHTML;
 
-    const htmlTransparancyIssues = await checkHtmlNoAlt(outputText, myPath, true, window.getComputedStyle(cell.node).backgroundColor);
-    return htmlTransparancyIssues;
+    const htmlAccessIssues = await checkHtmlNoAccessIssues(outputText, myPath, true, window.getComputedStyle(cell.node).backgroundColor);
+    return htmlAccessIssues;
   } else {
     return [];
   }
@@ -234,9 +166,9 @@ async function attachContentChangedListener(altCellList: AltCellList, cell: Cell
   cell.model.contentChanged.connect(async (sender, args) => {
 
     if (isEnabled()){
-      const mdCellIssues = await checkMarkdownCellForImageWithoutAlt(cell, myPath);
-      const hasImageWithoutAlt = await checkCodeCellForImageWithTransparency(cell, myPath);
-      var issues = mdCellIssues.concat(hasImageWithoutAlt)
+      const mdCellIssues = await checkMarkdownCellForImageAccessibility(cell, myPath);
+      const codeCellIssues = await checkCodeCellForImageAccessibility(cell, myPath);
+      var issues = mdCellIssues.concat(codeCellIssues)
 
       applyVisualIndicator(altCellList, cell, issues);
     } else {
@@ -256,9 +188,9 @@ function applyVisualIndicator(altCellList: AltCellList, cell: Cell, listIssues: 
       altCellList.addCell(cell.model.id, "Cell Error: Missing Alt Tag");
       applyIndic = true;
     } else {
-      var score = Number(listIssues[i]);
+      var score = Number(listIssues[i].split(" ")[0]);
       if (score < 9) {
-        altCellList.addCell(cell.model.id, "Cell Error: Low Image Visibility");
+        altCellList.addCell(cell.model.id, "Cell Error: Low Image Contrast");
         applyIndic = true;
       }
     }
@@ -304,8 +236,8 @@ async function addToolbarButton(labShell: ILabShell, altCellList: AltCellList, n
       notebookPanel.content.widgets.forEach(async cell => {
         
         if (isEnabled()){
-          const mdCellIssues = await checkMarkdownCellForImageWithoutAlt(cell, myPath);
-          const hasImageWithoutAlt = await checkCodeCellForImageWithTransparency(cell, myPath);
+          const mdCellIssues = await checkMarkdownCellForImageAccessibility(cell, myPath);
+          const hasImageWithoutAlt = await checkCodeCellForImageAccessibility(cell, myPath);
           var issues = mdCellIssues.concat(hasImageWithoutAlt)
     
           applyVisualIndicator(altCellList, cell, issues);
@@ -378,8 +310,8 @@ const plugin: JupyterFrontEndPlugin<void> = {
 
             //for each existing cell, check the accessibility once to initially flag it or not
             if (isEnabled){
-              const mdCellIssues = await checkMarkdownCellForImageWithoutAlt(cell, notebookTracker.currentWidget!.context.path);
-              const hasImageWithoutAlt = await checkCodeCellForImageWithTransparency(cell, notebookTracker.currentWidget!.context.path);
+              const mdCellIssues = await checkMarkdownCellForImageAccessibility(cell, notebookTracker.currentWidget!.context.path);
+              const hasImageWithoutAlt = await checkCodeCellForImageAccessibility(cell, notebookTracker.currentWidget!.context.path);
               var issues = mdCellIssues.concat(hasImageWithoutAlt)
         
               applyVisualIndicator(altCellList, cell, issues);
