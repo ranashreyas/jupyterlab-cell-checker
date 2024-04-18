@@ -12,99 +12,158 @@ import { Widget } from '@lumino/widgets';
 import { LabIcon } from '@jupyterlab/ui-components';
 
 
-function mapOfHeadings(notebookContent: Notebook, altCellList: AltCellList) {
+// function mapOfHeadings(notebookContent: Notebook, altCellList: AltCellList) {
+//   const headingsMap: Array<{headingLevel: number, myCell: Cell, heading: string }> = [];
+
+//   //for each existing cell, attach a content changed listener
+//   notebookContent.widgets.forEach(async cell => {
+//     if (cell.model.type === 'markdown') {
+//       const mCell = cell as MarkdownCell;
+
+//       const cellText = mCell.model.toJSON().source.toString();
+//       // const cellId = mCell.model.id;
+//       // Regex to match Markdown headings, capturing the level based on the number of '#' and the heading content
+//       const markdownHeadingRegex = /^(#+) \s*(.*)$/gm;
+//       // Regex to match HTML headings, capturing the level and the heading content
+//       const htmlHeadingRegex = /<h(\d+)>(.*?)<\/h\1>/gi;
+
+//       let match;
+//       // Extract Markdown headings and format them as 'h# <heading content>'
+//       while ((match = markdownHeadingRegex.exec(cellText)) !== null) {
+//         const level = match[1].length;  // The level is determined by the number of '#'
+//         headingsMap.push({headingLevel: level, heading: `${match[2].trim()}`, myCell: mCell});
+//       }
+
+//       // Extract HTML headings and format them similarly
+//       while ((match = htmlHeadingRegex.exec(cellText)) !== null) {
+//         const level = parseInt(match[1]);  // The level is directly captured by the regex
+//         headingsMap.push({headingLevel: level, heading: `${match[2].trim()}`, myCell: mCell });
+//       }
+//     }
+//   });
+
+//   console.log("Extracted Headings with Cell IDs:", headingsMap);
+
+
+//   let previousLevel = headingsMap[0].headingLevel;
+//   let highestLevel = previousLevel;
+//   // let isValid = true;
+//   const errors: Array<{myCell: Cell, current: string, expected: string}> = [];
+
+
+//   headingsMap.forEach((heading, index) => {
+//     if (heading.headingLevel > previousLevel + 1) {
+//       // If the current heading level skips more than one level
+//       // console.error(`Heading level improperly skips from h${previousLevel} to h${heading.headingLevel} at Cell ID ${heading.id}.`);
+//       errors.push({
+//         myCell: heading.myCell,
+//         current: `h${heading.headingLevel}`,
+//         expected: `h${previousLevel + 1}`
+//       });
+//       // isValid = false;
+//     } else if (heading.headingLevel < highestLevel){
+//       // console.error(`Heading level h${heading.headingLevel} exceeds max heading h${highestLevel} at Cell ID ${heading.id}.`);
+//       errors.push({
+//         myCell: heading.myCell,
+//         current: `h${heading.headingLevel}`,
+//         expected: `h${highestLevel}`
+//       });
+//       // isValid = false;
+//     }
+
+//     previousLevel = heading.headingLevel; // Update the previous level to current for the next iteration
+//   });
+//   // console.log(errors);
+
+//   errors.forEach(e => {
+//     applyVisualIndicator(altCellList, e.myCell, ["heading " + e.current + " " + e.expected]);
+//   })
+
+// }
+
+async function checkAllCells(notebookContent: Notebook, altCellList: AltCellList, isEnabled: () => boolean, myPath: string) {
   const headingsMap: Array<{headingLevel: number, myCell: Cell, heading: string }> = [];
 
-  //for each existing cell, attach a content changed listener
   notebookContent.widgets.forEach(async cell => {
-    if (cell.model.type === 'markdown') {
-      const mCell = cell as MarkdownCell;
+    if (isEnabled()){
+      //Image transparency, contrast, and alt checking
+      var issues: string[] = [];
+      applyVisualIndicator(altCellList, cell, issues);
 
-      const cellText = mCell.model.toJSON().source.toString();
-      // const cellId = mCell.model.id;
-      // Regex to match Markdown headings, capturing the level based on the number of '#' and the heading content
-      const markdownHeadingRegex = /^(#+) \s*(.*)$/gm;
-      // Regex to match HTML headings, capturing the level and the heading content
-      const htmlHeadingRegex = /<h(\d+)>(.*?)<\/h\1>/gi;
+      //header ordering checking
+      if (cell.model.type === 'markdown') {
+        const mCell = cell as MarkdownCell;
 
-      let match;
-      // Extract Markdown headings and format them as 'h# <heading content>'
-      while ((match = markdownHeadingRegex.exec(cellText)) !== null) {
-        const level = match[1].length;  // The level is determined by the number of '#'
-        headingsMap.push({headingLevel: level, heading: `${match[2].trim()}`, myCell: mCell});
+        const cellText = mCell.model.toJSON().source.toString();
+        const markdownHeadingRegex = /^(#+) \s*(.*)$/gm;
+        const htmlHeadingRegex = /<h(\d+)>(.*?)<\/h\1>/gi;
+
+        let match;
+        while ((match = markdownHeadingRegex.exec(cellText)) !== null) {
+          const level = match[1].length;  // The level is determined by the number of '#'
+          headingsMap.push({headingLevel: level, heading: `${match[2].trim()}`, myCell: mCell});
+        }
+
+        while ((match = htmlHeadingRegex.exec(cellText)) !== null) {
+          const level = parseInt(match[1]);  // The level is directly captured by the regex
+          headingsMap.push({headingLevel: level, heading: `${match[2].trim()}`, myCell: mCell });
+        }
       }
 
-      // Extract HTML headings and format them similarly
-      while ((match = htmlHeadingRegex.exec(cellText)) !== null) {
-        const level = parseInt(match[1]);  // The level is directly captured by the regex
-        headingsMap.push({headingLevel: level, heading: `${match[2].trim()}`, myCell: mCell });
+      console.log("Extracted Headings with Cell IDs:", headingsMap);
+      
+      if (headingsMap.length > 0){
+        let previousLevel = headingsMap[0].headingLevel;
+        let highestLevel = previousLevel;
+        const errors: Array<{myCell: Cell, current: string, expected: string}> = [];
+  
+        headingsMap.forEach((heading, index) => {
+          if (heading.headingLevel > previousLevel + 1) {
+            // If the current heading level skips more than one level
+            errors.push({
+              myCell: heading.myCell,
+              current: `h${heading.headingLevel}`,
+              expected: `h${previousLevel + 1}`
+            });
+          } else if (heading.headingLevel < highestLevel){
+            //if the header is higher than the first ever header
+            errors.push({
+              myCell: heading.myCell,
+              current: `h${heading.headingLevel}`,
+              expected: `h${highestLevel}`
+            });
+          }
+  
+          previousLevel = heading.headingLevel;
+        });
+  
+        errors.forEach(e => {
+          applyVisualIndicator(altCellList, e.myCell, ["heading " + e.current + " " + e.expected]);
+        });
       }
+      
+    } else {
+      applyVisualIndicator(altCellList, cell, []);
     }
   });
-
-  console.log("Extracted Headings with Cell IDs:", headingsMap);
-
-
-  let previousLevel = headingsMap[0].headingLevel;
-  let highestLevel = previousLevel;
-  // let isValid = true;
-  const errors: Array<{myCell: Cell, current: string, expected: string}> = [];
-
-
-  headingsMap.forEach((heading, index) => {
-    if (heading.headingLevel > previousLevel + 1) {
-      // If the current heading level skips more than one level
-      // console.error(`Heading level improperly skips from h${previousLevel} to h${heading.headingLevel} at Cell ID ${heading.id}.`);
-      errors.push({
-        myCell: heading.myCell,
-        current: `h${heading.headingLevel}`,
-        expected: `h${previousLevel + 1}`
-      });
-      // isValid = false;
-    } else if (heading.headingLevel < highestLevel){
-      // console.error(`Heading level h${heading.headingLevel} exceeds max heading h${highestLevel} at Cell ID ${heading.id}.`);
-      errors.push({
-        myCell: heading.myCell,
-        current: `h${heading.headingLevel}`,
-        expected: `h${highestLevel}`
-      });
-      // isValid = false;
-    }
-
-    previousLevel = heading.headingLevel; // Update the previous level to current for the next iteration
-  });
-  // console.log(errors);
-
-  errors.forEach(e => {
-    applyVisualIndicator(altCellList, e.myCell, ["heading " + e.current + " " + e.expected]);
-  })
-
 }
 
 async function attachContentChangedListener(notebookContent: Notebook, altCellList: AltCellList, cell: Cell, isEnabled: () => boolean, myPath: string) {
 
+  //for each existing cell, attach a content changed listener
   cell.model.contentChanged.connect(async (sender, args) => {
-
-    if (isEnabled()){
-      var issues: string[] = [];
-      applyVisualIndicator(altCellList, cell, issues);
-      mapOfHeadings(notebookContent, altCellList);
-    } else {
-      applyVisualIndicator(altCellList, cell, []);
-    }
+    await checkAllCells(notebookContent, altCellList, isEnabled, myPath);
   });
   
 }
 
 function applyVisualIndicator(altCellList: AltCellList, cell: Cell, listIssues: string[]) {
   const indicatorId = 'accessibility-indicator-' + cell.model.id;
-  // altCellList.removeCell(cell.model.id);
 
   let applyIndic = false;
   for (let i = 0; i < listIssues.length; i++) {
 
     if (listIssues[i].slice(0,7) == "heading") { //heading h1 h1
-      // console.log("Heading format: expecting " + listIssues[i].slice(11, 13) + ", got " + listIssues[i].slice(8, 10));
       altCellList.addCell(cell.model.id, "Heading format: expecting " + listIssues[i].slice(11, 13) + ", got " + listIssues[i].slice(8, 10));
       applyIndic = true;
     } else if (listIssues[i] == "Alt") {
@@ -114,7 +173,6 @@ function applyVisualIndicator(altCellList: AltCellList, cell: Cell, listIssues: 
   }
   
   if (applyIndic) {
-    console.log(applyIndic);
     if (!document.getElementById(indicatorId)) {
       let indicator = document.createElement('div');
       indicator.id = indicatorId;
@@ -150,18 +208,7 @@ async function addToolbarButton(labShell: ILabShell, altCellList: AltCellList, n
         labShell.collapseRight();
       }
       
-      notebookPanel.content.widgets.forEach(async cell => {
-        
-        if (isEnabled()){
-          var issues: string[] = [];
-          applyVisualIndicator(altCellList, cell, issues);
-          mapOfHeadings(notebookPanel.content, altCellList);
-
-        } else {
-          applyVisualIndicator(altCellList, cell, []);
-        }
-
-      });
+      checkAllCells(notebookPanel.content, altCellList, isEnabled, myPath);
     },
 
     tooltip: 'Toggle Alt-text Check'
@@ -220,20 +267,10 @@ const plugin: JupyterFrontEndPlugin<void> = {
 
           //for each existing cell, attach a content changed listener
           content.widgets.forEach(async cell => {
-        
-          
             attachContentChangedListener(content, altCellList, cell, () => isEnabled, notebookTracker.currentWidget!.context.path);
-
-            //for each existing cell, check the accessibility once to initially flag it or not
-            if (isEnabled){
-              var issues: string[] = [];
-              applyVisualIndicator(altCellList, cell, issues);
-              mapOfHeadings(content, altCellList)
-            } else {
-              applyVisualIndicator(altCellList, cell, []);
-            }
-            
           });
+
+          checkAllCells(content, altCellList, () => isEnabled, notebookTracker.currentWidget!.context.path)
 
           //every time a cell is added, attach a content listener to it
           if (content.model) {
@@ -277,7 +314,6 @@ class AltCellList extends Widget {
 
   addCell(cellId: string, buttonContent: string): void {
 
-    console.log("adding cell");
     const listItem = document.createElement('div');
     listItem.id = 'cell-' + cellId + "_" + buttonContent;
 
