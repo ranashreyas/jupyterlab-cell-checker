@@ -4,7 +4,7 @@ import {
   JupyterFrontEndPlugin
 } from '@jupyterlab/application';
 
-import { INotebookTracker, NotebookPanel} from '@jupyterlab/notebook';
+import { INotebookTracker, Notebook, NotebookPanel} from '@jupyterlab/notebook';
 import { ToolbarButton } from '@jupyterlab/apputils';
 import { MarkdownCell, ICellModel, Cell } from '@jupyterlab/cells';
 import { IDisposable } from '@lumino/disposable';
@@ -61,7 +61,7 @@ async function checkMDNoAlt(mdString: string, myPath: string, cellColor: string)
   
 }
 
-async function checkMarkdownCellForImageWithoutAlt(cell: Cell, myPath: string): Promise<string[]> {
+async function checkTextCellForImageWithoutAlt(cell: Cell, myPath: string): Promise<string[]> {
   if(cell.model.type == 'markdown'){
     cell = cell as MarkdownCell;
     const cellText = cell.model.toJSON().source.toString();
@@ -78,17 +78,26 @@ async function checkMarkdownCellForImageWithoutAlt(cell: Cell, myPath: string): 
   }
 }
 
-async function attachContentChangedListener(altCellList: AltCellList, cell: Cell, isEnabled: () => boolean, myPath: string) {
-  cell.model.contentChanged.connect(async (sender, args) => {
 
+function checkAllCells(notebookContent: Notebook, altCellList: AltCellList, isEnabled: () => boolean, myPath: string) {
+  // const headingsMap: Array<{headingLevel: number, myCell: Cell, heading: string }> = [];
+
+  notebookContent.widgets.forEach(async cell => {
     if (isEnabled()){
-      const mdCellIssues = await checkMarkdownCellForImageWithoutAlt(cell, myPath);
+      //Image transparency, contrast, and alt checking
+      const mdCellIssues = await checkTextCellForImageWithoutAlt(cell, myPath);
       var issues = mdCellIssues
-
       applyVisualIndicator(altCellList, cell, issues);
     } else {
       applyVisualIndicator(altCellList, cell, []);
     }
+  });
+}
+
+function attachContentChangedListener(notebookContent: Notebook, altCellList: AltCellList, cell: Cell, isEnabled: () => boolean, myPath: string) {
+  //for each existing cell, attach a content changed listener
+  cell.model.contentChanged.connect(async (sender, args) => {
+    await checkAllCells(notebookContent, altCellList, isEnabled, myPath);
   });
   
 }
@@ -142,20 +151,7 @@ async function addToolbarButton(labShell: ILabShell, altCellList: AltCellList, n
         labShell.collapseRight();
       }
       
-      notebookPanel.content.widgets.forEach(async cell => {
-        
-        if (isEnabled()){
-          const mdCellIssues = await checkMarkdownCellForImageWithoutAlt(cell, myPath);
-          // const hasImageWithoutAlt = await checkCodeCellForImageWithTransparency(cell, myPath);
-          // var issues = mdCellIssues.concat(hasImageWithoutAlt)
-          var issues = mdCellIssues;
-    
-          applyVisualIndicator(altCellList, cell, issues);
-        } else {
-          applyVisualIndicator(altCellList, cell, []);
-        }
-
-      });
+      checkAllCells(notebookPanel.content, altCellList, isEnabled, myPath);
     },
 
     tooltip: 'Toggle Alt-text Check'
@@ -177,7 +173,7 @@ const plugin: JupyterFrontEndPlugin<void> = {
   activate: (app: JupyterFrontEnd, notebookTracker: INotebookTracker, labShell: ILabShell) => {
     console.log("before wait")
     new Promise<void>(resolve => {
-      setTimeout(resolve, 1000);
+      setTimeout(resolve, 0);
     }).then(() => {
 
       console.log('JupyterLab extension jupyterlab_accessibility is activated!');
@@ -214,33 +210,21 @@ const plugin: JupyterFrontEndPlugin<void> = {
 
           //for each existing cell, attach a content changed listener
           content.widgets.forEach(async cell => {
-        
-          
-            attachContentChangedListener(altCellList, cell, () => isEnabled, notebookTracker.currentWidget!.context.path);
-
-            //for each existing cell, check the accessibility once to initially flag it or not
-            if (isEnabled){
-              const mdCellIssues = await checkMarkdownCellForImageWithoutAlt(cell, notebookTracker.currentWidget!.context.path);
-              // const hasImageWithoutAlt = await checkCodeCellForImageWithTransparency(cell, notebookTracker.currentWidget!.context.path);
-              // var issues = mdCellIssues.concat(hasImageWithoutAlt)
-              var issues = mdCellIssues;
-        
-              applyVisualIndicator(altCellList, cell, issues);
-            } else {
-              applyVisualIndicator(altCellList, cell, []);
-            }
-            
+            attachContentChangedListener(content, altCellList, cell, () => isEnabled, notebookTracker.currentWidget!.context.path);            
           });
+
+          checkAllCells(content, altCellList, () => isEnabled, notebookTracker.currentWidget!.context.path);
 
           //every time a cell is added, attach a content listener to it
           if (content.model) {
             content.model.cells.changed.connect((sender, args) => {
               if (args.type === 'add') {
-                args.newValues.forEach((cellModel: ICellModel) => {
+                args.newValues.forEach(async (cellModel: ICellModel) => {
                   const cell = content.widgets.find(c => c.model.id === cellModel.id);
                   if(cell){
                     const newCell = cell as Cell
-                    attachContentChangedListener(altCellList, newCell, () => isEnabled, notebookTracker.currentWidget!.context.path);  
+                    attachContentChangedListener(content, altCellList, newCell, () => isEnabled, notebookTracker.currentWidget!.context.path);
+                    await checkAllCells(content, altCellList, () => isEnabled, notebookTracker.currentWidget!.context.path);
                   }          
                 });
               }
