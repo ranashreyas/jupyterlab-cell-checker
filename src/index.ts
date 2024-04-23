@@ -49,7 +49,6 @@ async function checkMDNoAlt(mdString: string, myPath: string, cellColor: string)
         }
     }
   
-  
     if (imageNoAltRegex.test(mdString)){
       accessibilityTests.push("Alt");
     }
@@ -61,7 +60,7 @@ async function checkMDNoAlt(mdString: string, myPath: string, cellColor: string)
   
 }
 
-async function checkTextCellForImageWithoutAlt(cell: Cell, myPath: string): Promise<string[]> {
+async function checkTextCellForImageWithAccessIssues(cell: Cell, myPath: string): Promise<string[]> {
   if(cell.model.type == 'markdown'){
     cell = cell as MarkdownCell;
     const cellText = cell.model.toJSON().source.toString();
@@ -80,7 +79,7 @@ function checkAllCells(notebookContent: Notebook, altCellList: AltCellList, isEn
   notebookContent.widgets.forEach(async cell => {
     if (isEnabled()){
       //Image transparency, contrast, and alt checking
-      const mdCellIssues = await checkTextCellForImageWithoutAlt(cell, myPath);
+      const mdCellIssues = await checkTextCellForImageWithAccessIssues(cell, myPath);
       var issues = mdCellIssues
       applyVisualIndicator(altCellList, cell, issues);
     } else {
