@@ -65,9 +65,6 @@ async function checkTextCellForImageWithoutAlt(cell: Cell, myPath: string): Prom
   if(cell.model.type == 'markdown'){
     cell = cell as MarkdownCell;
     const cellText = cell.model.toJSON().source.toString();
-    // console.log(cell.node);
-    // console.log(window.getComputedStyle(cell.node));
-    // console.log(window.getComputedStyle(cell.node).backgroundColor);
     
     const markdownNoAlt = await checkMDNoAlt(cellText, myPath, window.getComputedStyle(cell.node).backgroundColor);
     const htmlNoAlt = await checkHtmlNoAlt(cellText, myPath, false, window.getComputedStyle(cell.node).backgroundColor);
@@ -80,8 +77,6 @@ async function checkTextCellForImageWithoutAlt(cell: Cell, myPath: string): Prom
 
 
 function checkAllCells(notebookContent: Notebook, altCellList: AltCellList, isEnabled: () => boolean, myPath: string) {
-  // const headingsMap: Array<{headingLevel: number, myCell: Cell, heading: string }> = [];
-
   notebookContent.widgets.forEach(async cell => {
     if (isEnabled()){
       //Image transparency, contrast, and alt checking
