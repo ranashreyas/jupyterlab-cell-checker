@@ -4,7 +4,7 @@ import {
   JupyterFrontEndPlugin
 } from '@jupyterlab/application';
 
-import { INotebookTracker, NotebookPanel} from '@jupyterlab/notebook';
+import { INotebookTracker, Notebook, NotebookPanel} from '@jupyterlab/notebook';
 import { ToolbarButton } from '@jupyterlab/apputils';
 import { MarkdownCell, ICellModel, CodeCell, Cell } from '@jupyterlab/cells';
 import { IDisposable } from '@lumino/disposable';
@@ -22,7 +22,6 @@ function getImageTransparency(imgString: string, notebookPath: string): Promise<
     } catch (_) {
       const baseUrl = document.location.origin;
       var finalPath = `${baseUrl}/files/${imgString}`
-      // console.log(finalPath);
       img.src = finalPath;
     }
 
@@ -51,9 +50,7 @@ function getImageTransparency(imgString: string, notebookPath: string): Promise<
         }
       }
 
-      const transparencyPercentage = (transparentPixelCount / totalPixels) * 100;
-      // console.log(10 - transparencyPercentage/10);
-      
+      const transparencyPercentage = (transparentPixelCount / totalPixels) * 100;      
       resolve((10 - transparencyPercentage/10) + " transp");
     };
 
@@ -99,13 +96,10 @@ async function checkMDNoAccessIssues(mdString: string, myPath: string, cellColor
   return accessibilityTests;
 }
 
-async function checkMarkdownCellForImageWithAccessIssues(cell: Cell, myPath: string): Promise<string[]> {
+async function checkTextCellForImageWithAccessIssues(cell: Cell, myPath: string): Promise<string[]> {
   if(cell.model.type == 'markdown'){
     cell = cell as MarkdownCell;
     const cellText = cell.model.toJSON().source.toString();
-    // console.log(cell.node);
-    // console.log(window.getComputedStyle(cell.node));
-    // console.log(window.getComputedStyle(cell.node).backgroundColor);
     
     const markdownNoAlt = await checkMDNoAccessIssues(cellText, myPath, window.getComputedStyle(cell.node).backgroundColor);
     const htmlNoAlt = await checkHtmlNoAccessIssues(cellText, myPath, false, window.getComputedStyle(cell.node).backgroundColor);
@@ -126,14 +120,12 @@ async function checkCodeCellForImageWithTransparency(cell: Cell, myPath: string)
   } else {
     return [];
   }
-  
 }
 
-async function attachContentChangedListener(altCellList: AltCellList, cell: Cell, isEnabled: () => boolean, myPath: string) {
-  cell.model.contentChanged.connect(async (sender, args) => {
-
+function checkAllCells(notebookContent: Notebook, altCellList: AltCellList, isEnabled: () => boolean, myPath: string) {
+  notebookContent.widgets.forEach(async cell => {
     if (isEnabled()){
-      const mdCellIssues = await checkMarkdownCellForImageWithAccessIssues(cell, myPath);
+      const mdCellIssues = await checkTextCellForImageWithAccessIssues(cell, myPath);
       const hasImageWithoutAlt = await checkCodeCellForImageWithTransparency(cell, myPath);
       var issues = mdCellIssues.concat(hasImageWithoutAlt)
 
@@ -141,6 +133,12 @@ async function attachContentChangedListener(altCellList: AltCellList, cell: Cell
     } else {
       applyVisualIndicator(altCellList, cell, []);
     }
+  });
+}
+
+async function attachContentChangedListener(notebookContent: Notebook, altCellList: AltCellList, cell: Cell, isEnabled: () => boolean, myPath: string) {
+  cell.model.contentChanged.connect(async (sender, args) => {
+    checkAllCells(notebookContent, altCellList, isEnabled, myPath)
   });
   
 }
@@ -200,19 +198,7 @@ async function addToolbarButton(labShell: ILabShell, altCellList: AltCellList, n
         labShell.collapseRight();
       }
       
-      notebookPanel.content.widgets.forEach(async cell => {
-        
-        if (isEnabled()){
-          const mdCellIssues = await checkMarkdownCellForImageWithAccessIssues(cell, myPath);
-          const hasImageWithoutAlt = await checkCodeCellForImageWithTransparency(cell, myPath);
-          var issues = mdCellIssues.concat(hasImageWithoutAlt)
-    
-          applyVisualIndicator(altCellList, cell, issues);
-        } else {
-          applyVisualIndicator(altCellList, cell, []);
-        }
-
-      });
+      checkAllCells(notebookPanel.content, altCellList, isEnabled, myPath);
     },
 
     tooltip: 'Toggle Alt-text Check'
@@ -234,7 +220,7 @@ const plugin: JupyterFrontEndPlugin<void> = {
   activate: (app: JupyterFrontEnd, notebookTracker: INotebookTracker, labShell: ILabShell) => {
     console.log("before wait")
     new Promise<void>(resolve => {
-      setTimeout(resolve, 1000);
+      setTimeout(resolve, 0);
     }).then(() => {
 
       console.log('JupyterLab extension jupyterlab_accessibility is activated!');
@@ -271,22 +257,10 @@ const plugin: JupyterFrontEndPlugin<void> = {
 
           //for each existing cell, attach a content changed listener
           content.widgets.forEach(async cell => {
-        
-          
-            attachContentChangedListener(altCellList, cell, () => isEnabled, notebookTracker.currentWidget!.context.path);
-
-            //for each existing cell, check the accessibility once to initially flag it or not
-            if (isEnabled){
-              const mdCellIssues = await checkMarkdownCellForImageWithAccessIssues(cell, notebookTracker.currentWidget!.context.path);
-              const hasImageWithoutAlt = await checkCodeCellForImageWithTransparency(cell, notebookTracker.currentWidget!.context.path);
-              var issues = mdCellIssues.concat(hasImageWithoutAlt)
-        
-              applyVisualIndicator(altCellList, cell, issues);
-            } else {
-              applyVisualIndicator(altCellList, cell, []);
-            }
-            
+            attachContentChangedListener(content, altCellList, cell, () => isEnabled, notebookTracker.currentWidget!.context.path);
           });
+
+          checkAllCells(content, altCellList, () => isEnabled, notebookTracker.currentWidget!.context.path);
 
           //every time a cell is added, attach a content listener to it
           if (content.model) {
@@ -296,7 +270,8 @@ const plugin: JupyterFrontEndPlugin<void> = {
                   const cell = content.widgets.find(c => c.model.id === cellModel.id);
                   if(cell){
                     const newCell = cell as Cell
-                    attachContentChangedListener(altCellList, newCell, () => isEnabled, notebookTracker.currentWidget!.context.path);  
+                    attachContentChangedListener(content, altCellList, newCell, () => isEnabled, notebookTracker.currentWidget!.context.path);
+                    checkAllCells(content, altCellList, () => isEnabled, notebookTracker.currentWidget!.context.path);
                   }          
                 });
               }
