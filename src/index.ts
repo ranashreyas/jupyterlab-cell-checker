@@ -4,6 +4,7 @@ import {
   JupyterFrontEndPlugin
 } from '@jupyterlab/application';
 
+import {kmeans, Options} from 'ml-kmeans';
 import { INotebookTracker, Notebook, NotebookPanel} from '@jupyterlab/notebook';
 import { ToolbarButton } from '@jupyterlab/apputils';
 import { MarkdownCell, ICellModel, CodeCell, Cell } from '@jupyterlab/cells';
@@ -11,89 +12,163 @@ import { IDisposable } from '@lumino/disposable';
 import { Widget } from '@lumino/widgets';
 import { LabIcon } from '@jupyterlab/ui-components';
 
-
-function getImageContrast(imgString: string, notebookPath: string, cellColor: string): Promise<string> {
+async function getImageContrast(imageSrc: string, notebookPath: string, cellColor: string, numClusters: number = 3): Promise<string> {
   return new Promise((resolve, reject) => {
     const img = new Image();
-    img.crossOrigin = 'Anonymous'; // Needed for CORS-compliant images
-
+    img.crossOrigin = 'Anonymous'; // Needed if the image is served from a different domain
+    
     try {
-      new URL(imgString);
-      img.src = imgString;
+      new URL(imageSrc);
+      img.src = imageSrc;
     } catch (_) {
       const baseUrl = document.location.origin;
-      var finalPath = `${baseUrl}/files/${imgString}`
+      var finalPath = `${baseUrl}/files/${imageSrc}`
       // console.log(finalPath);
       img.src = finalPath;
     }
 
     img.onload = () => {
       const canvas = document.createElement('canvas');
-      canvas.width = img.width;
-      canvas.height = img.height;
-
-      const context = canvas.getContext('2d');
-      if (!context) {
+      const ctx = canvas.getContext('2d');
+      if (!ctx) {
         console.log('Failed to get canvas context');
         resolve(20 + " contrast");
         return;
       }
+      canvas.width = img.width;
+      canvas.height = img.height;
+      ctx.drawImage(img, 0, 0);
+      const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
 
-      context.drawImage(img, 0, 0);
-      // const borderWidth = 3; // Width of the border
-      const imageData = context.getImageData(0, 0, img.width, img.height);
-      const data = imageData.data;
-
-      let colorCounts: { [key: string]: number } = {};
-
-      for (let i = 0; i < data.length; i += 4) {
-        // Convert each color to a string in the format "r,g,b"
-        var r = Math.floor(data[i]/10)*10;
-        var g = Math.floor(data[i+1]/10)*10;
-        var b = Math.floor(data[i+2]/10)*10;
-
-        const color = "#" + ((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1).toUpperCase();
-        if(data[i+3] < 255){
-          continue;
-        }
-
-        // Count occurrences of the color
-        if (colorCounts[color]) {
-          colorCounts[color]++;
-        } else {
-          colorCounts[color] = 1;
+      // Convert imageData to an array of RGB values
+      let data = [];
+      for (let i = 0; i < imageData.length; i += 4) {
+        if(imageData[i+3] > 100){
+          Math.floor
+          data.push([Math.floor(imageData[i]/10)*10, Math.floor(imageData[i + 1]/10)*10, Math.floor(imageData[i + 2]/10)*10]);
         }
       }
 
-      // Find the most frequent color
-      let dominantColor = '';
-      let maxCount = 0;
-      for (const [color, count] of Object.entries(colorCounts)) {
-        if (count > maxCount) {
-          dominantColor = color;
-          maxCount = count;
-        }
+      // Perform K-means clustering to find dominant colors
+      // Define k-means options
+      const options: Options = {
+        initialization: 'kmeans++',
+        maxIterations: 25,
+        tolerance: 1e-6
+      };
+      const result = kmeans(data, numClusters, options);
+      const counts = new Array(numClusters).fill(0);
+      for (const label of result.clusters) {
+        counts[label]++;
       }
-      
+
+      // Determine the index of the most dominant cluster
+      const dominantClusterIndex = counts.indexOf(Math.max(...counts));
+      const dominantColor = result.centroids[dominantClusterIndex].map(Math.round)
+
+      const imgColor = "#" + ((1 << 24) + (dominantColor[0] << 16) + (dominantColor[1] << 8) + dominantColor[2]).toString(16).slice(1).toUpperCase();
+
       fetch('https://www.aremycolorsaccessible.com/api/are-they', {
         mode: 'cors',
         method: 'POST',
-        body: JSON.stringify({ colors: [dominantColor, cellColor] }),
+        body: JSON.stringify({ colors: [imgColor, cellColor] }),
       })
         .then((response) => response.json())
         .then((json) => {
           // console.log(json);
           var contrast = parseFloat(json["contrast"].split(":")[0]);
-          console.log("Dominant Color: " + dominantColor + " vs cell color: " + cellColor + ". Contrast: " + contrast);
-          resolve(contrast + " contrast");
+          console.log("Dominant Color: " + imgColor + " vs cell color: " + cellColor + ". Contrast: " + contrast);
+          resolve(contrast + " contrast " + imgColor);
         });
-      // resolve(dominantColor);
-
     };
 
     img.onerror = () => reject('Failed to load image');
   });
 }
+
+
+// function getImageContrast_old(imgString: string, notebookPath: string, cellColor: string): Promise<string> {
+//   return new Promise((resolve, reject) => {
+//     const img = new Image();
+//     img.crossOrigin = 'Anonymous'; // Needed for CORS-compliant images
+
+//     try {
+//       new URL(imgString);
+//       img.src = imgString;
+//     } catch (_) {
+//       const baseUrl = document.location.origin;
+//       var finalPath = `${baseUrl}/files/${imgString}`
+//       // console.log(finalPath);
+//       img.src = finalPath;
+//     }
+
+//     img.onload = () => {
+//       const canvas = document.createElement('canvas');
+//       canvas.width = img.width;
+//       canvas.height = img.height;
+
+//       const context = canvas.getContext('2d');
+//       if (!context) {
+//         console.log('Failed to get canvas context');
+//         resolve(20 + " contrast");
+//         return;
+//       }
+
+//       context.drawImage(img, 0, 0);
+//       // const borderWidth = 3; // Width of the border
+//       const imageData = context.getImageData(0, 0, img.width, img.height);
+//       const data = imageData.data;
+
+//       let colorCounts: { [key: string]: number } = {};
+
+//       for (let i = 0; i < data.length; i += 4) {
+//         // Convert each color to a string in the format "r,g,b"
+//         var r = Math.floor(data[i]/10)*10;
+//         var g = Math.floor(data[i+1]/10)*10;
+//         var b = Math.floor(data[i+2]/10)*10;
+
+//         const color = "#" + ((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1).toUpperCase();
+//         if(data[i+3] < 255){
+//           continue;
+//         }
+
+//         // Count occurrences of the color
+//         if (colorCounts[color]) {
+//           colorCounts[color]++;
+//         } else {
+//           colorCounts[color] = 1;
+//         }
+//       }
+
+//       // Find the most frequent color
+//       let dominantColor = '';
+//       let maxCount = 0;
+//       for (const [color, count] of Object.entries(colorCounts)) {
+//         if (count > maxCount) {
+//           dominantColor = color;
+//           maxCount = count;
+//         }
+//       }
+      
+//       fetch('https://www.aremycolorsaccessible.com/api/are-they', {
+//         mode: 'cors',
+//         method: 'POST',
+//         body: JSON.stringify({ colors: [dominantColor, cellColor] }),
+//       })
+//         .then((response) => response.json())
+//         .then((json) => {
+//           // console.log(json);
+//           var contrast = parseFloat(json["contrast"].split(":")[0]);
+//           console.log("Dominant Color: " + dominantColor + " vs cell color: " + cellColor + ". Contrast: " + contrast);
+//           resolve(contrast + " contrast");
+//         });
+//       // resolve(dominantColor);
+
+//     };
+
+//     img.onerror = () => reject('Failed to load image');
+//   });
+// }
 
 async function checkHtmlNoAccessIssues(htmlString: string, myPath: string, isCodeCellOutput: boolean, cellColor: string): Promise<string[]> {
   const parser = new DOMParser();
@@ -198,7 +273,7 @@ function applyVisualIndicator(altCellList: AltCellList, cell: Cell, listIssues: 
     } else {
       var score = Number(listIssues[i].split(" ")[0]);
       if (score < 5) {
-        altCellList.addCell(cell.model.id, "Cell Error: Low Image Contrast");
+        altCellList.addCell(cell.model.id, "Cell Error: Image Contrast " + listIssues[i].split(" ")[2]);
         applyIndic = true;
       }
     }
