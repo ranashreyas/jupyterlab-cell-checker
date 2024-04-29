@@ -60,9 +60,9 @@
     "@jupyterlab/mainmenu": "^4.1.2",
     "@jupyterlab/nbformat": "^4.1.2",
     "@jupyterlab/notebook": "^4.1.1",
+    "@jupyterlab/ui-components": "^4.1.5",
     "@lumino/disposable": "^2.1.2",
-    "@lumino/widgets": "^2.3.1",
-    "@jupyterlab/ui-components": "^4.1.5"
+    "@lumino/widgets": "^2.3.1"
   },
   "devDependencies": {
     "@jupyterlab/builder": "^4.0.0",
