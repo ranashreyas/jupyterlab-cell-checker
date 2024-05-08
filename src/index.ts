@@ -4,7 +4,8 @@ import {
     JupyterFrontEndPlugin
   } from '@jupyterlab/application';
   
-  import {kmeans, Options} from 'ml-kmeans';
+  // import {kmeans, Options} from 'ml-kmeans';
+  import ColorThief from 'colorthief';
   import { INotebookTracker, Notebook, NotebookPanel} from '@jupyterlab/notebook';
   import { ToolbarButton } from '@jupyterlab/apputils';
   import { MarkdownCell, ICellModel, CodeCell, Cell } from '@jupyterlab/cells';
@@ -17,6 +18,7 @@ import {
       const img = new Image();
       img.crossOrigin = 'Anonymous'; // Needed if the image is served from a different domain
       
+      console.log("hello world");
       try {
         new URL(imageSrc);
         img.src = imageSrc;
@@ -28,58 +30,83 @@ import {
       }
   
       img.onload = () => {
-        const canvas = document.createElement('canvas');
-        const ctx = canvas.getContext('2d');
-        if (!ctx) {
-          console.log('Failed to get canvas context');
-          resolve(20 + " contrast");
-          return;
-        }
-        canvas.width = img.width;
-        canvas.height = img.height;
-        ctx.drawImage(img, 0, 0);
-        const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
-  
-        // Convert imageData to an array of RGB values
-        let data = [];
-        for (let i = 0; i < imageData.length; i += 4) {
-          if(imageData[i+3] > 100){
-            Math.floor
-            data.push([Math.floor(imageData[i]/10)*10, Math.floor(imageData[i + 1]/10)*10, Math.floor(imageData[i + 2]/10)*10]);
-          }
-        }
-  
-        // Perform K-means clustering to find dominant colors
-        // Define k-means options
-        const options: Options = {
-          initialization: 'kmeans++',
-          maxIterations: 25,
-          tolerance: 1e-6
-        };
-        const result = kmeans(data, numClusters, options);
-        const counts = new Array(numClusters).fill(0);
-        for (const label of result.clusters) {
-          counts[label]++;
-        }
-  
-        // Determine the index of the most dominant cluster
-        const dominantClusterIndex = counts.indexOf(Math.max(...counts));
-        const dominantColor = result.centroids[dominantClusterIndex].map(Math.round)
-  
-        const imgColor = "#" + ((1 << 24) + (dominantColor[0] << 16) + (dominantColor[1] << 8) + dominantColor[2]).toString(16).slice(1).toUpperCase();
+        const colorThief = new ColorThief();
+        // const dominantColor = colorThief.getColor(img); // Gets the dominant color
+
+        const p = colorThief.getPalette(img, 3); // Get top 5 dominant colors
+        let palette: string[] = [];
+        p.forEach(c => {
+          var col = "#" + ((1 << 24) + (c[0] << 16) + (c[1] << 8) + c[2]).toString(16).slice(1).toUpperCase();
+          palette.push(col)
+        })
+        // console.log('Color Palette:', palette);
+
+        var highestContrast = -1;
+        var colorHighestContrast = "";
   
         fetch('https://www.aremycolorsaccessible.com/api/are-they', {
-          mode: 'cors',
           method: 'POST',
-          body: JSON.stringify({ colors: [imgColor, cellColor] }),
+          body: JSON.stringify({ colors: [palette[0], cellColor] }),
+          headers: { 'Content-Type': 'application/json' },
         })
-          .then((response) => response.json())
-          .then((json) => {
-            // console.log(json);
-            var contrast = parseFloat(json["contrast"].split(":")[0]);
-            console.log("Dominant Color: " + imgColor + " vs cell color: " + cellColor + ". Contrast: " + contrast);
-            resolve(contrast + " contrast " + imgColor);
+        .then(response => response.json())
+        .then(json => {
+          const contrast = parseFloat(json["contrast"].split(":")[0]);
+          // console.log(`Dominant Colors: ${imgColor} vs cell color: ${cellColor}. Contrast: ${contrast}`);
+          if(contrast > highestContrast){
+            highestContrast = contrast;
+            colorHighestContrast = palette[0]
+          }
+          console.log("step 1");
+          fetch('https://www.aremycolorsaccessible.com/api/are-they', {
+            method: 'POST',
+            body: JSON.stringify({ colors: [palette[1], cellColor] }),
+            headers: { 'Content-Type': 'application/json' },
+          })
+          .then(response => response.json())
+          .then(json => {
+            const contrast = parseFloat(json["contrast"].split(":")[0]);
+            // console.log(`Dominant Colors: ${imgColor} vs cell color: ${cellColor}. Contrast: ${contrast}`);
+            if(contrast > highestContrast){
+              highestContrast = contrast;
+              colorHighestContrast = palette[1]
+            }
+            console.log("step 2");
+            fetch('https://www.aremycolorsaccessible.com/api/are-they', {
+              method: 'POST',
+              body: JSON.stringify({ colors: [palette[2], cellColor] }),
+              headers: { 'Content-Type': 'application/json' },
+            })
+            .then(response => response.json())
+            .then(json => {
+              const contrast = parseFloat(json["contrast"].split(":")[0]);
+              // 
+              if(contrast > highestContrast){
+                highestContrast = contrast;
+                colorHighestContrast = palette[2]
+              }
+              console.log("step 3");
+              console.log(`Dominant Color: ${colorHighestContrast} vs cell color: ${cellColor}. Contrast: ${highestContrast}`);
+              resolve(`${highestContrast} contrast ${colorHighestContrast}`);
+            })
+            .catch(error => {
+              console.error('Error fetching contrast:', error);
+              reject('Failed to fetch contrast');
+            });
+          })
+          .catch(error => {
+            console.error('Error fetching contrast:', error);
+            reject('Failed to fetch contrast');
           });
+        })
+        .catch(error => {
+          console.error('Error fetching contrast:', error);
+          reject('Failed to fetch contrast');
+        });
+
+
+
+        
       };
   
       img.onerror = () => reject('Failed to load image');
